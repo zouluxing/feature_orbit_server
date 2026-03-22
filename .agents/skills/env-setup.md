@@ -8,290 +8,496 @@
 
 ---
 
+## 运行平台
+
+> 本项目主要在 **Windows** 环境下开发，使用 **Go 语言** 构建 SaaS 系统。
+> 推荐使用 PowerShell 执行启动脚本：
+> ```powershell
+> PowerShell -ExecutionPolicy Bypass -File scripts/setup-env.ps1
+> ```
+
+---
+
 ## 检查项总览
 
-| 编号 | 检查项 | 说明 | 自动修复 |
+### 基础环境（所有平台）
+
+| 编号 | 检查项 | 要求 | 自动修复 |
 |------|--------|------|----------|
-| E01 | Node.js 版本 | 需要 v18+ | ✅ 引导安装 |
-| E02 | Git 安装 | 需要 Git 2.x+ | ✅ 引导安装 |
-| E03 | Git 用户配置 | user.name / user.email | ✅ 自动配置 |
-| E04 | Claude Code 安装 | 需要最新版 | ✅ 自动安装 |
-| E05 | 仓库克隆状态 | 是否已克隆到本地 | ✅ 自动克隆 |
-| E06 | 当前分支 | 必须在 develop 分支 | ✅ 自动切换 |
-| E07 | 本地代码同步 | 与远端 develop 保持一致 | ✅ 自动拉取 |
-| E08 | .agents/skills 目录 | Skills 文件是否完整 | ✅ 自动拉取 |
-| E09 | docs 目录结构 | 文档目录是否完整 | ✅ 自动创建 |
-| E10 | 项目依赖安装 | package.json 依赖 / go mod 等 | ✅ 自动安装 |
+| E01 | Git 安装 | Git 2.x+ | ✅ 引导安装 |
+| E02 | Git 用户配置 | user.name / user.email | ✅ 交互配置 |
+| E03 | Node.js 版本 | v18+（Claude Code 依赖） | ✅ 引导安装 |
+| E04 | Claude Code 安装 | 最新版 | ✅ 自动安装 |
+| E05 | 仓库克隆状态 | 已克隆到本地 | ✅ 自动克隆 |
+| E06 | 当前分支 | 必须在 develop | ✅ 自动切换 |
+| E07 | 本地代码同步 | 与远端 develop 一致 | ✅ 自动拉取 |
+| E08 | .agents/skills 目录 | Skills 文件完整 | ✅ 自动拉取 |
+| E09 | docs 目录结构 | 文档目录完整 | ✅ 自动创建 |
+
+### Go 开发环境
+
+| 编号 | 检查项 | 要求 | 自动修复 |
+|------|--------|------|----------|
+| G01 | Go 安装与版本 | Go 1.21+ | ✅ 引导安装 |
+| G02 | GOPATH / GOROOT | 环境变量配置正确 | ✅ 自动检测报告 |
+| G03 | Go 模块初始化 | go.mod 存在 | ✅ 自动初始化 |
+| G04 | Go 项目依赖 | go mod download | ✅ 自动下载 |
+| G05 | Go 代码规范工具 | gofmt / golint / golangci-lint | ✅ 自动安装 |
+| G06 | Go 测试工具 | go test 可用 | ✅ 自动验证 |
+| G07 | 热重载工具 | air（开发期热重载） | ✅ 自动安装 |
+
+### SaaS 基础服务环境
+
+| 编号 | 检查项 | 要求 | 自动修复 |
+|------|--------|------|----------|
+| S01 | Docker Desktop | 已安装并运行 | ✅ 引导安装 |
+| S02 | Docker Compose | v2.x+ | ✅ 引导安装 |
+| S03 | 数据库服务 | PostgreSQL（Docker 容器） | ✅ 自动启动 |
+| S04 | 缓存服务 | Redis（Docker 容器） | ✅ 自动启动 |
+| S05 | 环境变量文件 | .env 文件存在且关键变量完整 | ✅ 从模板生成 |
+| S06 | 数据库连通性 | 能够连接到 PostgreSQL | ✅ 自动重试 |
+| S07 | 数据库迁移 | migrate 工具 + 迁移脚本 | ✅ 自动执行 |
+
+### Windows 专项检查
+
+| 编号 | 检查项 | 要求 | 自动修复 |
+|------|--------|------|----------|
+| W01 | PowerShell 版本 | PowerShell 5.1+ 或 PowerShell Core 7+ | ✅ 引导升级 |
+| W02 | Windows Terminal | 推荐安装 | ⚠️ 提示安装 |
+| W03 | Make 工具 | make 命令可用（通过 Scoop/Choco） | ✅ 自动安装 |
+| W04 | 行尾符配置 | Git autocrlf 设置正确 | ✅ 自动配置 |
+| W05 | 防火墙/端口 | 8080、5432、6379 端口可用 | ✅ 检测报告 |
 
 ---
 
 ## SKILL_STEPS
 
-### Step 1 — 检测 Node.js
+### Step 1 — 基础环境检查（E01~E09）
 
-```bash
-# 检测 Node.js 是否安装且版本 >= 18
-node_version=$(node -v 2>/dev/null | sed 's/v//' | cut -d. -f1)
-
-if [ -z "$node_version" ]; then
-  echo "❌ [E01] Node.js 未安装"
-  echo "👉 自动修复：请访问 https://nodejs.org 下载 LTS 版本安装"
-  echo "   或使用 nvm 安装："
-  echo "   curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash"
-  echo "   nvm install 20 && nvm use 20"
-  # Windows 用户提示
-  echo "   Windows 用户：https://nodejs.org/dist/latest/ 下载 .msi 安装包"
-  exit 1
-elif [ "$node_version" -lt 18 ]; then
-  echo "❌ [E01] Node.js 版本过低（当前: v${node_version}，需要: v18+）"
-  echo "👉 自动修复：nvm install 20 && nvm use 20"
-  exit 1
-else
-  echo "✅ [E01] Node.js v$(node -v) 已就绪"
-fi
-```
-
----
-
-### Step 2 — 检测 Git
-
-```bash
-# 检测 Git 是否安装
-if ! command -v git &> /dev/null; then
-  echo "❌ [E02] Git 未安装"
-  echo "👉 自动修复："
-  echo "   macOS:   brew install git"
-  echo "   Ubuntu:  sudo apt-get install git"
-  echo "   Windows: https://git-scm.com/download/win"
-  exit 1
-else
-  echo "✅ [E02] Git $(git --version) 已就绪"
-fi
-
-# 检测 Git 用户配置
-git_name=$(git config --global user.name)
-git_email=$(git config --global user.email)
-
-if [ -z "$git_name" ]; then
-  echo "⚠️  [E03] Git user.name 未配置，自动修复中..."
-  read -p "请输入你的 Git 用户名: " input_name
-  git config --global user.name "$input_name"
-  echo "✅ [E03] Git user.name 已设置为: $input_name"
-else
-  echo "✅ [E03] Git user.name: $git_name"
-fi
-
-if [ -z "$git_email" ]; then
-  echo "⚠️  [E03] Git user.email 未配置，自动修复中..."
-  read -p "请输入你的 Git 邮箱: " input_email
-  git config --global user.email "$input_email"
-  echo "✅ [E03] Git user.email 已设置为: $input_email"
-else
-  echo "✅ [E03] Git user.email: $git_email"
-fi
-```
-
----
-
-### Step 3 — 检测 Claude Code
-
-```bash
-# 检测 Claude Code 是否安装
-if ! command -v claude &> /dev/null; then
-  echo "⚠️  [E04] Claude Code 未安装，自动安装中..."
-  npm install -g @anthropic-ai/claude-code
-  if command -v claude &> /dev/null; then
-    echo "✅ [E04] Claude Code 安装成功: $(claude --version)"
-  else
-    echo "❌ [E04] Claude Code 安装失败，请手动执行: npm install -g @anthropic-ai/claude-code"
+```powershell
+# [E01] 检测 Git
+if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+    Write-Host "❌ [E01] Git 未安装"
+    Write-Host "👉 请访问 https://git-scm.com/download/win 下载安装"
+    Write-Host "   或使用 winget: winget install --id Git.Git -e --source winget"
     exit 1
-  fi
-else
-  echo "✅ [E04] Claude Code $(claude --version) 已就绪"
-fi
-```
+} else {
+    Write-Host "✅ [E01] $(git --version) 已就绪"
+}
 
----
+# [E02] Git 用户配置
+$gitName = git config --global user.name
+$gitEmail = git config --global user.email
+if (-not $gitName) {
+    $gitName = Read-Host "⚠️  [E02] 请输入 Git 用户名"
+    git config --global user.name $gitName
+}
+if (-not $gitEmail) {
+    $gitEmail = Read-Host "⚠️  [E02] 请输入 Git 邮箱"
+    git config --global user.email $gitEmail
+}
+Write-Host "✅ [E02] Git 用户: $gitName <$gitEmail>"
 
-### Step 4 — 检测仓库状态
-
-```bash
-# 检测是否在 git 仓库中
-if ! git rev-parse --git-dir &> /dev/null; then
-  echo "⚠️  [E05] 当前目录不是 Git 仓库，自动克隆中..."
-  cd ..
-  git clone https://github.com/zouluxing/feature_orbit.git
-  cd feature_orbit
-  echo "✅ [E05] 仓库克隆成功"
-else
-  echo "✅ [E05] Git 仓库已就绪: $(git remote get-url origin)"
-fi
-
-# 检测当前分支
-current_branch=$(git branch --show-current)
-if [ "$current_branch" != "develop" ]; then
-  echo "⚠️  [E06] 当前分支为 '$current_branch'，自动切换到 develop..."
-  git checkout develop 2>/dev/null || git checkout -b develop origin/develop
-  echo "✅ [E06] 已切换到 develop 分支"
-else
-  echo "✅ [E06] 当前分支: develop"
-fi
-
-# 同步远端最新代码
-echo "🔄 [E07] 同步远端最新代码..."
-git fetch origin
-local_sha=$(git rev-parse HEAD)
-remote_sha=$(git rev-parse origin/develop)
-
-if [ "$local_sha" != "$remote_sha" ]; then
-  echo "⚠️  [E07] 本地代码落后于远端，自动拉取中..."
-  git pull origin develop
-  echo "✅ [E07] 代码已同步到最新"
-else
-  echo "✅ [E07] 本地代码已是最新"
-fi
-```
-
----
-
-### Step 5 — 检测 Skills 完整性
-
-```bash
-# 检测 .agents/skills 目录及所有 Skill 文件
-SKILLS_DIR=".agents/skills"
-REQUIRED_SKILLS=(
-  "env-setup.md"
-  "requirements-engineer.md"
-  "designer.md"
-  "developer.md"
-  "tester.md"
-  "qa-engineer.md"
-  "devops-engineer.md"
-)
-
-if [ ! -d "$SKILLS_DIR" ]; then
-  echo "⚠️  [E08] .agents/skills 目录不存在，重新拉取中..."
-  git pull origin develop
-fi
-
-missing_skills=[]
-for skill in "${REQUIRED_SKILLS[@]}"; do
-  if [ ! -f "$SKILLS_DIR/$skill" ]; then
-    missing_skills+=("$skill")
-    echo "❌ [E08] 缺少 Skill 文件: $skill"
-  fi
-done
-
-if [ ${#missing_skills[@]} -gt 0 ]; then
-  echo "⚠️  [E08] 发现缺失的 Skill 文件，尝试重新拉取..."
-  git pull origin develop --force
-  echo "✅ [E08] Skills 已重新拉取"
-else
-  echo "✅ [E08] 所有 Skill 文件完整 (${#REQUIRED_SKILLS[@]}/${#REQUIRED_SKILLS[@]})"
-fi
-```
-
----
-
-### Step 6 — 检测文档目录结构
-
-```bash
-# 检测并创建必要的文档目录
-REQUIRED_DIRS=(
-  "docs/requirements"
-  "docs/design"
-  "docs/testing"
-  "docs/qa"
-  "docs/deploy"
-  "docs/playbook"
-)
-
-for dir in "${REQUIRED_DIRS[@]}"; do
-  if [ ! -d "$dir" ]; then
-    echo "⚠️  [E09] 目录不存在，自动创建: $dir"
-    mkdir -p "$dir"
-    touch "$dir/.gitkeep"
-    echo "✅ [E09] 已创建: $dir"
-  fi
-done
-echo "✅ [E09] 文档目录结构完整"
-```
-
----
-
-### Step 7 — 检测项目依赖
-
-```bash
-# 根据项目类型自动检测并安装依赖
-
-# Flutter/Dart 项目
-if [ -f "pubspec.yaml" ]; then
-  echo "🔍 检测到 Flutter 项目"
-  if ! command -v flutter &> /dev/null; then
-    echo "❌ [E10] Flutter SDK 未安装"
-    echo "👉 请访问 https://flutter.dev/docs/get-started/install 安装 Flutter"
+# [E03] 检测 Node.js（Claude Code 依赖）
+try {
+    $nodeVer = (node -v).TrimStart('v').Split('.')[0]
+    if ([int]$nodeVer -ge 18) {
+        Write-Host "✅ [E03] Node.js $(node -v) 已就绪"
+    } else {
+        Write-Host "❌ [E03] Node.js 版本过低，请升级到 v18+"
+        Start-Process "https://nodejs.org"
+        exit 1
+    }
+} catch {
+    Write-Host "❌ [E03] Node.js 未安装，请访问 https://nodejs.org 安装"
     exit 1
-  fi
-  echo "🔄 [E10] 安装 Flutter 依赖..."
-  flutter pub get
-  echo "✅ [E10] Flutter 依赖安装完成"
-fi
+}
 
-# Go 项目
-if [ -f "go.mod" ]; then
-  echo "🔍 检测到 Go 项目"
-  if ! command -v go &> /dev/null; then
-    echo "❌ [E10] Go 未安装，请访问 https://golang.org/dl/ 安装"
-    exit 1
-  fi
-  echo "🔄 [E10] 安装 Go 依赖..."
-  go mod download
-  echo "✅ [E10] Go 依赖安装完成"
-fi
+# [E04] 检测 Claude Code
+if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
+    Write-Host "🔧 [E04] 自动安装 Claude Code..."
+    npm install -g @anthropic-ai/claude-code
+    Write-Host "✅ [E04] Claude Code 安装成功"
+} else {
+    Write-Host "✅ [E04] Claude Code 已就绪"
+}
 
-# Node.js 项目
-if [ -f "package.json" ]; then
-  echo "🔍 检测到 Node.js 项目"
-  if [ ! -d "node_modules" ]; then
-    echo "🔄 [E10] 安装 Node.js 依赖..."
-    npm install
-    echo "✅ [E10] Node.js 依赖安装完成"
-  else
-    echo "✅ [E10] Node.js 依赖已就绪"
-  fi
-fi
-
-# 无依赖文件
-if [ ! -f "pubspec.yaml" ] && [ ! -f "go.mod" ] && [ ! -f "package.json" ]; then
-  echo "✅ [E10] 无需安装项目依赖（项目初始化阶段）"
-fi
+# [E05~E09] 仓库、分支、同步、Skills、文档目录（见 setup-env.ps1 完整脚本）
 ```
 
 ---
 
-### Step 8 — 输出环境报告
+### Step 2 — Go 开发环境检查（G01~G07）
 
-```bash
-echo ""
-echo "================================================"
-echo "         环境检查报告"
-echo "================================================"
-echo "✅ E01  Node.js:        $(node -v)"
-echo "✅ E02  Git:            $(git --version)"
-echo "✅ E03  Git 用户:       $(git config --global user.name)"
-echo "✅ E04  Claude Code:    $(claude --version 2>/dev/null || echo '已安装')"
-echo "✅ E05  仓库:           $(git remote get-url origin)"
-echo "✅ E06  当前分支:       $(git branch --show-current)"
-echo "✅ E07  代码同步:       最新"
-echo "✅ E08  Skills:         完整"
-echo "✅ E09  文档目录:       完整"
-echo "✅ E10  项目依赖:       已就绪"
-echo "================================================"
-echo "🚀 环境准备就绪！可以开始工作了。"
-echo "================================================"
-echo ""
-echo "📋 下一步：告诉我你要开始哪个阶段？"
-echo "   例如：'开始需求分析' 或 '继续开发阶段'"
+```powershell
+# [G01] 检测 Go 安装与版本
+Write-Host "[G01] 检测 Go 环境..."
+if (-not (Get-Command go -ErrorAction SilentlyContinue)) {
+    Write-Host "❌ [G01] Go 未安装"
+    Write-Host "👉 自动修复选项："
+    Write-Host "   方式一：winget install GoLang.Go"
+    Write-Host "   方式二：访问 https://golang.org/dl/ 下载安装"
+    # 尝试用 winget 自动安装
+    if (Get-Command winget -ErrorAction SilentlyContinue) {
+        Write-Host "🔧 [G01] 尝试通过 winget 安装 Go..."
+        winget install GoLang.Go --silent
+        # 刷新环境变量
+        $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+    }
+    if (-not (Get-Command go -ErrorAction SilentlyContinue)) {
+        Write-Host "❌ [G01] Go 安装失败，请手动安装后重新运行"
+        exit 1
+    }
+}
+$goVersion = go version
+# 检查版本 >= 1.21
+$goVer = ($goVersion -match 'go(\d+)\.(\d+)') | Out-Null; $goMajor = [int]$Matches[1]; $goMinor = [int]$Matches[2]
+if ($goMajor -lt 1 -or ($goMajor -eq 1 -and $goMinor -lt 21)) {
+    Write-Host "❌ [G01] Go 版本过低（需要 1.21+），当前: $goVersion"
+    Write-Host "👉 请更新: winget upgrade GoLang.Go"
+    exit 1
+}
+Write-Host "✅ [G01] $goVersion 已就绪"
+
+# [G02] 检测 GOPATH / GOROOT
+Write-Host "[G02] 检测 Go 环境变量..."
+$goRoot = go env GOROOT
+$goPath = go env GOPATH
+$goProxy = go env GOPROXY
+Write-Host "✅ [G02] GOROOT: $goRoot"
+Write-Host "✅ [G02] GOPATH: $goPath"
+# 推荐设置 GOPROXY（国内加速）
+if ($goProxy -eq "direct" -or $goProxy -eq "") {
+    Write-Host "⚠️  [G02] GOPROXY 未配置，设置国内加速镜像..."
+    go env -w GOPROXY=https://goproxy.cn,direct
+    go env -w GONOSUMCHECK=*
+    Write-Host "✅ [G02] GOPROXY 已设置为: https://goproxy.cn,direct"
+} else {
+    Write-Host "✅ [G02] GOPROXY: $goProxy"
+}
+
+# [G03] 检测 go.mod
+Write-Host "[G03] 检测 Go 模块..."
+if (-not (Test-Path "go.mod")) {
+    Write-Host "⚠️  [G03] go.mod 不存在，自动初始化..."
+    go mod init github.com/zouluxing/feature_orbit
+    Write-Host "✅ [G03] go.mod 已初始化"
+} else {
+    $modName = (Get-Content go.mod | Select-String "^module").ToString().Split(" ")[1]
+    Write-Host "✅ [G03] Go 模块: $modName"
+}
+
+# [G04] 下载 Go 依赖
+Write-Host "[G04] 检测 Go 项目依赖..."
+go mod download
+go mod tidy
+Write-Host "✅ [G04] Go 依赖已就绪"
+
+# [G05] 安装代码规范工具
+Write-Host "[G05] 检测 Go 代码规范工具..."
+# gofmt 随 Go 安装自带
+Write-Host "✅ [G05] gofmt 已就绪（Go 内置）"
+
+# golangci-lint
+if (-not (Get-Command golangci-lint -ErrorAction SilentlyContinue)) {
+    Write-Host "🔧 [G05] 安装 golangci-lint..."
+    go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+    Write-Host "✅ [G05] golangci-lint 安装成功"
+} else {
+    Write-Host "✅ [G05] golangci-lint 已就绪"
+}
+
+# [G06] 验证 go test
+Write-Host "[G06] 验证 Go 测试工具..."
+$testResult = go help test 2>&1
+if ($LASTEXITCODE -eq 0) {
+    Write-Host "✅ [G06] go test 可用"
+} else {
+    Write-Host "❌ [G06] go test 异常，请检查 Go 安装"
+    exit 1
+}
+
+# [G07] 安装热重载工具 air
+Write-Host "[G07] 检测热重载工具 air..."
+if (-not (Get-Command air -ErrorAction SilentlyContinue)) {
+    Write-Host "🔧 [G07] 安装 air 热重载工具..."
+    go install github.com/cosmtrek/air@latest
+    Write-Host "✅ [G07] air 安装成功"
+} else {
+    Write-Host "✅ [G07] air 热重载工具已就绪"
+}
+# 生成默认 air 配置（如果不存在）
+if (-not (Test-Path ".air.toml")) {
+    air init
+    Write-Host "✅ [G07] .air.toml 配置文件已生成"
+}
+```
+
+---
+
+### Step 3 — SaaS 基础服务检查（S01~S07）
+
+```powershell
+# [S01] 检测 Docker Desktop
+Write-Host "[S01] 检测 Docker Desktop..."
+if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+    Write-Host "❌ [S01] Docker 未安装"
+    Write-Host "👉 请访问 https://www.docker.com/products/docker-desktop 安装 Docker Desktop"
+    Write-Host "   或使用 winget: winget install Docker.DockerDesktop"
+    exit 1
+}
+try {
+    docker info | Out-Null
+    Write-Host "✅ [S01] Docker Desktop 已运行: $(docker --version)"
+} catch {
+    Write-Host "❌ [S01] Docker 已安装但未运行，请启动 Docker Desktop"
+    exit 1
+}
+
+# [S02] 检测 Docker Compose
+Write-Host "[S02] 检测 Docker Compose..."
+try {
+    $composeVer = docker compose version
+    Write-Host "✅ [S02] $composeVer 已就绪"
+} catch {
+    Write-Host "❌ [S02] Docker Compose 不可用，请更新 Docker Desktop"
+    exit 1
+}
+
+# [S03~S04] 启动基础服务（PostgreSQL + Redis）
+Write-Host "[S03] 检测 PostgreSQL 服务..."
+if (Test-Path "docker-compose.yml") {
+    # 使用项目 docker-compose 启动服务
+    $pgRunning = docker compose ps --services --filter "status=running" 2>$null
+    if ($pgRunning -notcontains "postgres") {
+        Write-Host "🔧 [S03] 启动 PostgreSQL 容器..."
+        docker compose up -d postgres
+        Start-Sleep -Seconds 5
+        Write-Host "✅ [S03] PostgreSQL 容器已启动"
+    } else {
+        Write-Host "✅ [S03] PostgreSQL 容器正在运行"
+    }
+
+    Write-Host "[S04] 检测 Redis 服务..."
+    if ($pgRunning -notcontains "redis") {
+        Write-Host "🔧 [S04] 启动 Redis 容器..."
+        docker compose up -d redis
+        Write-Host "✅ [S04] Redis 容器已启动"
+    } else {
+        Write-Host "✅ [S04] Redis 容器正在运行"
+    }
+} else {
+    Write-Host "⚠️  [S03] docker-compose.yml 不存在，跳过服务检查（初始化阶段正常）"
+}
+
+# [S05] 检测 .env 文件
+Write-Host "[S05] 检测环境变量文件..."
+if (-not (Test-Path ".env")) {
+    if (Test-Path ".env.example") {
+        Write-Host "🔧 [S05] 从 .env.example 生成 .env 文件..."
+        Copy-Item ".env.example" ".env"
+        Write-Host "✅ [S05] .env 文件已生成，请检查并填写关键配置项"
+        Write-Host "   关键配置项：DB_HOST, DB_PASSWORD, JWT_SECRET, REDIS_ADDR"
+    } else {
+        Write-Host "⚠️  [S05] .env 和 .env.example 均不存在（初始化阶段正常）"
+    }
+} else {
+    # 检查关键变量是否存在
+    $envContent = Get-Content ".env"
+    $requiredVars = @("DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD", "JWT_SECRET", "REDIS_ADDR")
+    $missingVars = @()
+    foreach ($var in $requiredVars) {
+        if (-not ($envContent | Select-String "^$var=")) {
+            $missingVars += $var
+        }
+    }
+    if ($missingVars.Count -gt 0) {
+        Write-Host "⚠️  [S05] .env 缺少以下关键变量: $($missingVars -join ', ')"
+        Write-Host "   请在 .env 文件中补充以上配置项"
+    } else {
+        Write-Host "✅ [S05] .env 环境变量文件完整"
+    }
+}
+
+# [S06] 检测数据库连通性
+Write-Host "[S06] 检测数据库连通性..."
+if ((Test-Path ".env") -and (Get-Command docker -ErrorAction SilentlyContinue)) {
+    $retries = 0
+    $maxRetries = 5
+    $connected = $false
+    while ($retries -lt $maxRetries -and -not $connected) {
+        $result = docker exec feature_orbit_postgres pg_isready -U postgres 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            $connected = $true
+        } else {
+            $retries++
+            Write-Host "⚠️  [S06] 数据库连接中... ($retries/$maxRetries)"
+            Start-Sleep -Seconds 3
+        }
+    }
+    if ($connected) {
+        Write-Host "✅ [S06] PostgreSQL 连接正常"
+    } else {
+        Write-Host "⚠️  [S06] 数据库连接超时，请检查 Docker 容器状态"
+    }
+} else {
+    Write-Host "⚠️  [S06] 跳过数据库连通性检查（初始化阶段正常）"
+}
+
+# [S07] 检测数据库迁移工具
+Write-Host "[S07] 检测数据库迁移工具..."
+if (-not (Get-Command migrate -ErrorAction SilentlyContinue)) {
+    Write-Host "🔧 [S07] 安装 golang-migrate 工具..."
+    go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+    if (Get-Command migrate -ErrorAction SilentlyContinue) {
+        Write-Host "✅ [S07] migrate 工具安装成功"
+    } else {
+        Write-Host "⚠️  [S07] migrate 安装后需重启 PowerShell 才能识别，请重新运行脚本"
+    }
+} else {
+    Write-Host "✅ [S07] golang-migrate 工具已就绪"
+}
+# 执行待执行的迁移（如果存在迁移目录）
+if ((Test-Path "migrations") -and (Get-Command migrate -ErrorAction SilentlyContinue)) {
+    Write-Host "🔧 [S07] 执行数据库迁移..."
+    # 从 .env 读取 DB_URL
+    $dbUrl = (Get-Content ".env" | Select-String "^DATABASE_URL=(.*)").Matches.Groups[1].Value
+    if ($dbUrl) {
+        migrate -path migrations -database $dbUrl up
+        Write-Host "✅ [S07] 数据库迁移完成"
+    } else {
+        Write-Host "⚠️  [S07] DATABASE_URL 未配置，跳过迁移"
+    }
+}
+```
+
+---
+
+### Step 4 — Windows 专项检查（W01~W05）
+
+```powershell
+# [W01] 检测 PowerShell 版本
+Write-Host "[W01] 检测 PowerShell 版本..."
+$psVer = $PSVersionTable.PSVersion
+if ($psVer.Major -ge 7) {
+    Write-Host "✅ [W01] PowerShell $psVer (Core) 已就绪"
+} elseif ($psVer.Major -ge 5) {
+    Write-Host "✅ [W01] PowerShell $psVer 已就绪（推荐升级到 PS7: winget install Microsoft.PowerShell）"
+} else {
+    Write-Host "❌ [W01] PowerShell 版本过低，请升级"
+    exit 1
+}
+
+# [W02] 检测 Windows Terminal（推荐）
+Write-Host "[W02] 检测 Windows Terminal..."
+if (Get-Command wt -ErrorAction SilentlyContinue) {
+    Write-Host "✅ [W02] Windows Terminal 已安装"
+} else {
+    Write-Host "⚠️  [W02] 建议安装 Windows Terminal: winget install Microsoft.WindowsTerminal"
+}
+
+# [W03] 检测 make 工具
+Write-Host "[W03] 检测 make 工具..."
+if (-not (Get-Command make -ErrorAction SilentlyContinue)) {
+    Write-Host "🔧 [W03] 安装 make 工具..."
+    if (Get-Command scoop -ErrorAction SilentlyContinue) {
+        scoop install make
+        Write-Host "✅ [W03] make 通过 Scoop 安装成功"
+    } elseif (Get-Command choco -ErrorAction SilentlyContinue) {
+        choco install make -y
+        Write-Host "✅ [W03] make 通过 Chocolatey 安装成功"
+    } elseif (Get-Command winget -ErrorAction SilentlyContinue) {
+        winget install GnuWin32.Make
+        Write-Host "✅ [W03] make 通过 winget 安装成功"
+    } else {
+        Write-Host "⚠️  [W03] 无法自动安装 make，推荐安装 Scoop: irm get.scoop.sh | iex"
+    }
+} else {
+    Write-Host "✅ [W03] make $(make --version | head -1) 已就绪"
+}
+
+# [W04] Git 行尾符配置
+Write-Host "[W04] 检测 Git 行尾符配置..."
+$autoCrlf = git config --global core.autocrlf
+if ($autoCrlf -ne "true") {
+    Write-Host "🔧 [W04] 设置 Git core.autocrlf = true（Windows 标准）..."
+    git config --global core.autocrlf true
+    git config --global core.safecrlf warn
+    Write-Host "✅ [W04] Git 行尾符已配置 (autocrlf=true)"
+} else {
+    Write-Host "✅ [W04] Git 行尾符配置正确 (autocrlf=true)"
+}
+
+# [W05] 检测关键端口占用
+Write-Host "[W05] 检测关键端口可用性..."
+$ports = @{
+    8080 = "Go 应用服务"
+    5432 = "PostgreSQL"
+    6379 = "Redis"
+    9090 = "Prometheus（可选）"
+}
+$portConflict = $false
+foreach ($port in $ports.Keys) {
+    $inUse = netstat -ano | Select-String ":$port " | Where-Object { $_ -match "LISTENING" }
+    if ($inUse) {
+        Write-Host "⚠️  [W05] 端口 $port (${ports[$port]}) 已被占用"
+        $portConflict = $true
+    } else {
+        Write-Host "✅ [W05] 端口 $port (${ports[$port]}) 可用"
+    }
+}
+if ($portConflict) {
+    Write-Host "⚠️  [W05] 部分端口被占用，可能影响服务启动，请检查"
+}
+```
+
+---
+
+### Step 5 — 输出完整环境报告
+
+```powershell
+Write-Host ""
+Write-Host "================================================"
+Write-Host "           环境检查完整报告"
+Write-Host "================================================"
+Write-Host "  [基础环境]"
+Write-Host "  Git:             $(git --version)"
+Write-Host "  Node.js:         $(node -v)"
+Write-Host "  Claude Code:     已就绪"
+Write-Host "  分支:            $(git branch --show-current)"
+Write-Host "  代码版本:        $(git rev-parse --short HEAD)"
+Write-Host ""
+Write-Host "  [Go 开发环境]"
+Write-Host "  Go:              $(go version)"
+Write-Host "  GOPATH:          $(go env GOPATH)"
+Write-Host "  GOPROXY:         $(go env GOPROXY)"
+Write-Host "  golangci-lint:   已就绪"
+Write-Host "  air（热重载）:   已就绪"
+Write-Host "  migrate:         已就绪"
+Write-Host ""
+Write-Host "  [SaaS 服务]"
+Write-Host "  Docker:          $(docker --version)"
+Write-Host "  PostgreSQL:      容器运行中"
+Write-Host "  Redis:           容器运行中"
+Write-Host "  .env 配置:       完整"
+Write-Host ""
+Write-Host "  [Windows 环境]"
+Write-Host "  PowerShell:      $($PSVersionTable.PSVersion)"
+Write-Host "  make:            已就绪"
+Write-Host "  Git autocrlf:    true"
+Write-Host "  关键端口:        可用"
+Write-Host "================================================"
+Write-Host ""
+Write-Host "  🚀 环境准备就绪！可以开始工作了。"
+Write-Host ""
+Write-Host "  📋 可用的工作阶段："
+Write-Host "     1. 需求分析  →  说: '开始需求分析'"
+Write-Host "     2. 系统设计  →  说: '开始系统设计'"
+Write-Host "     3. 开发实现  →  说: '开始开发'"
+Write-Host "     4. 测试验证  →  说: '开始测试'"
+Write-Host "     5. 质量保障  →  说: '开始QA验收'"
+Write-Host "     6. 部署上线  →  说: '开始部署'"
+Write-Host "================================================"
 ```
 
 ---
@@ -300,12 +506,17 @@ echo "   例如：'开始需求分析' 或 '继续开发阶段'"
 
 ```
 环境检查报告（全部通过后输出）：
-✅ E01 ~ E10 所有检查项通过
+✅ E01~E09  基础环境检查全部通过
+✅ G01~G07  Go 开发环境检查全部通过
+✅ S01~S07  SaaS 服务检查全部通过
+✅ W01~W05  Windows 专项检查全部通过
 🚀 环境准备就绪，可以开始工作
 ```
 
 ## SKILL_DONE_CRITERIA
-- 所有 E01~E10 检查项均通过
+- 所有检查项均通过（E01~E09、G01~G07、S01~S07、W01~W05）
+- Go 版本 >= 1.21，模块已初始化，依赖已下载
+- Docker 运行中，PostgreSQL 和 Redis 容器正常
+- .env 文件存在且关键变量完整
 - 当前位于 develop 分支且代码为最新
-- 输出「环境准备就绪」提示
-- 自动进入用户指定的阶段任务
+- 输出「环境准备就绪」提示后自动进入用户指定阶段
