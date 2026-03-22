@@ -1,5 +1,5 @@
 # ================================================
-# feature_orbit 环境自动检测与准备脚本 (Windows)
+# feature_orbit_server 环境自动检测与准备脚本 (Windows)
 # 版本: 2.0.0
 # 平台: Windows + Go SaaS 开发
 # 用法: PowerShell -ExecutionPolicy Bypass -File scripts/setup-env.ps1
@@ -25,7 +25,7 @@ function Refresh-EnvPath {
 
 Write-Host ""
 Write-Host "================================================" -ForegroundColor Blue
-Write-Host "   feature_orbit 环境自动检测与准备 v2.0" -ForegroundColor Blue
+Write-Host "   feature_orbit_server 环境自动检测与准备 v2.0" -ForegroundColor Blue
 Write-Host "   平台: Windows | 语言: Go | 类型: SaaS" -ForegroundColor Blue
 Write-Host "================================================" -ForegroundColor Blue
 Write-Host ""
@@ -117,8 +117,8 @@ try {
 } catch {
     Log-Warn "当前目录不是 Git 仓库，自动克隆..."
     Set-Location ..
-    git clone https://github.com/zouluxing/feature_orbit.git
-    Set-Location feature_orbit
+    git clone https://github.com/zouluxing/feature_orbit_server.git
+    Set-Location feature_orbit_server
     Log-Fix "仓库克隆成功"
 }
 
@@ -197,7 +197,6 @@ if (-not (Get-Command go -ErrorAction SilentlyContinue)) {
     }
 } else {
     $goVer = go version
-    # 解析版本号
     if ($goVer -match 'go(\d+)\.(\d+)') {
         $major = [int]$Matches[1]; $minor = [int]$Matches[2]
         if ($major -gt 1 -or ($major -eq 1 -and $minor -ge 21)) {
@@ -222,7 +221,6 @@ if (Get-Command go -ErrorAction SilentlyContinue) {
     $goProxy = go env GOPROXY
     Log-Pass "GOROOT: $goRoot"
     Log-Pass "GOPATH: $goPath"
-    # 设置国内加速代理
     if ($goProxy -eq "direct" -or $goProxy -eq "" -or $goProxy -notmatch "goproxy.cn") {
         Log-Warn "GOPROXY 未使用国内加速，自动设置..."
         go env -w GOPROXY=https://goproxy.cn,direct
@@ -231,7 +229,6 @@ if (Get-Command go -ErrorAction SilentlyContinue) {
     } else {
         Log-Pass "GOPROXY: $goProxy"
     }
-    # 确保 GOPATH/bin 在 PATH 中
     $goBin = "$(go env GOPATH)\bin"
     if ($env:Path -notlike "*$goBin*") {
         Log-Warn "GOPATH/bin 不在 PATH 中，自动添加..."
@@ -250,8 +247,8 @@ Write-Host "[G03] 检测 Go 模块..." -ForegroundColor Blue
 if (Get-Command go -ErrorAction SilentlyContinue) {
     if (-not (Test-Path "go.mod")) {
         Log-Warn "go.mod 不存在，自动初始化..."
-        go mod init github.com/zouluxing/feature_orbit
-        Log-Fix "go.mod 已初始化: github.com/zouluxing/feature_orbit"
+        go mod init github.com/zouluxing/feature_orbit_server
+        Log-Fix "go.mod 已初始化: github.com/zouluxing/feature_orbit_server"
     } else {
         $modName = (Get-Content go.mod | Select-String "^module").ToString().Split(" ")[1]
         Log-Pass "Go 模块: $modName"
@@ -272,9 +269,7 @@ if ((Get-Command go -ErrorAction SilentlyContinue) -and (Test-Path "go.mod")) {
 # G05: 代码规范工具
 Write-Host "[G05] 检测 Go 代码规范工具..." -ForegroundColor Blue
 if (Get-Command go -ErrorAction SilentlyContinue) {
-    # gofmt 内置
     Log-Pass "gofmt 已就绪（Go 内置）"
-    # golangci-lint
     if (-not (Get-Command golangci-lint -ErrorAction SilentlyContinue)) {
         Log-Fix "安装 golangci-lint..."
         go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
@@ -282,9 +277,8 @@ if (Get-Command go -ErrorAction SilentlyContinue) {
         if (Get-Command golangci-lint -ErrorAction SilentlyContinue) { Log-Pass "golangci-lint 安装成功" }
         else { Log-Warn "golangci-lint 安装后需重启 PowerShell" }
     } else {
-        Log-Pass "golangci-lint $(golangci-lint --version 2>$null | Select-String 'version' | ForEach-Object { $_.ToString().Trim() }) 已就绪"
+        Log-Pass "golangci-lint 已就绪"
     }
-    # goimports
     if (-not (Get-Command goimports -ErrorAction SilentlyContinue)) {
         Log-Fix "安装 goimports..."
         go install golang.org/x/tools/cmd/goimports@latest
@@ -315,7 +309,6 @@ if (Get-Command go -ErrorAction SilentlyContinue) {
     } else {
         Log-Pass "air 热重载工具已就绪"
     }
-    # 生成默认配置文件
     if (-not (Test-Path ".air.toml")) {
         Log-Fix "生成 .air.toml 默认配置..."
         if (Get-Command air -ErrorAction SilentlyContinue) {
@@ -343,9 +336,7 @@ if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
     try {
         docker info 2>&1 | Out-Null
         if ($LASTEXITCODE -eq 0) { Log-Pass "Docker Desktop 已运行: $(docker --version)" }
-        else {
-            Log-Fail "Docker 已安装但未运行，请启动 Docker Desktop 后重试"
-        }
+        else { Log-Fail "Docker 已安装但未运行，请启动 Docker Desktop 后重试" }
     } catch {
         Log-Fail "Docker 服务未运行，请手动启动 Docker Desktop"
     }
@@ -377,7 +368,6 @@ if ((Get-Command docker -ErrorAction SilentlyContinue) -and (Test-Path "docker-c
     } else {
         Log-Pass "PostgreSQL 容器正在运行"
     }
-
     Write-Host "[S04] 检测 Redis 服务..." -ForegroundColor Blue
     if ($running -notcontains "redis") {
         Log-Fix "启动 Redis 容器..."
@@ -402,7 +392,7 @@ if (-not (Test-Path ".env")) {
         Log-Pass ".env 文件不存在（初始化阶段正常，后续需创建）"
     }
 } else {
-    $envContent  = Get-Content ".env" -ErrorAction SilentlyContinue
+    $envContent   = Get-Content ".env" -ErrorAction SilentlyContinue
     $requiredVars = @("DB_HOST","DB_PORT","DB_NAME","DB_USER","DB_PASSWORD","JWT_SECRET","REDIS_ADDR")
     $missingVars  = $requiredVars | Where-Object { -not ($envContent | Select-String "^$_=.+") }
     if ($missingVars.Count -gt 0) {
@@ -417,7 +407,7 @@ Write-Host "[S06] 检测数据库连通性..." -ForegroundColor Blue
 if ((Get-Command docker -ErrorAction SilentlyContinue) -and (Test-Path ".env")) {
     $retries = 0; $connected = $false
     while ($retries -lt 5 -and -not $connected) {
-        $result = docker exec feature_orbit_postgres pg_isready -U postgres 2>$null
+        $result = docker exec feature_orbit_server_postgres pg_isready -U postgres 2>$null
         if ($LASTEXITCODE -eq 0) { $connected = $true }
         else { $retries++; Write-Host "  ⏳ 等待数据库就绪... ($retries/5)"; Start-Sleep -Seconds 3 }
     }
@@ -439,7 +429,6 @@ if (Get-Command go -ErrorAction SilentlyContinue) {
     } else {
         Log-Pass "golang-migrate 工具已就绪"
     }
-    # 执行迁移
     if ((Test-Path "migrations") -and (Get-Command migrate -ErrorAction SilentlyContinue) -and (Test-Path ".env")) {
         $dbUrl = (Get-Content ".env" | Select-String "^DATABASE_URL=(.*)").Matches.Groups[1].Value
         if ($dbUrl) {

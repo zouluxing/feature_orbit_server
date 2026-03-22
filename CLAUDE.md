@@ -1,4 +1,4 @@
-# Feature Orbit — Claude Code 主配置
+# Feature Orbit Server — Claude Code 主配置
 
 ## 项目说明
 本项目使用 Claude Code Skills 实现分阶段、分角色的软件开发流程自动化。
@@ -9,15 +9,12 @@
 
 > **所有阶段任务开始前，必须先执行环境检查。**
 > Claude Code 在接收到任何阶段指令时，自动加载 `.agents/skills/env-setup.md`，
-> 完成全部检查项（E01~E10）并输出「环境准备就绪」后，才允许进入后续阶段。
+> 完成全部检查项（E01~E09、G01~G07、S01~S07、W01~W05）并输出「环境准备就绪」后，才允许进入后续阶段。
 
 **一键启动命令（每次开始工作前执行）：**
 
-```bash
-# macOS / Linux
-bash scripts/setup-env.sh
-
-# Windows PowerShell
+```powershell
+# Windows PowerShell（主要开发平台）
 PowerShell -ExecutionPolicy Bypass -File scripts/setup-env.ps1
 
 # 或直接启动 Claude Code（自动触发环境检查）
@@ -26,7 +23,7 @@ claude
 
 启动后 Claude Code 自动执行：
 ```
-第一步：加载 env-setup Skill → 执行 E01~E10 所有检查
+第一步：加载 env-setup Skill → 执行所有检查项
 第二步：发现未就绪项 → 自动修复
 第三步：所有检查通过 → 输出「环境准备就绪」
 第四步：询问用户要开始哪个阶段 → 加载对应 Skill 开始工作
@@ -80,14 +77,12 @@ Claude Code 在执行任务时会自动检索并加载匹配的 Skill。
 
 ## 快速启动
 
-```bash
+```powershell
 # 1. 进入项目目录
-cd feature_orbit
+cd feature_orbit_server
 
 # 2. 运行环境检查脚本（自动检测并修复环境）
-bash scripts/setup-env.sh        # macOS/Linux
-# 或
-PowerShell -ExecutionPolicy Bypass -File scripts/setup-env.ps1  # Windows
+PowerShell -ExecutionPolicy Bypass -File scripts/setup-env.ps1
 
 # 3. 启动 Claude Code
 claude
