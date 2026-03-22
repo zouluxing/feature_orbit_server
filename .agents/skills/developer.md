@@ -48,7 +48,7 @@ feature/notification     # 消息通知
 **执行内容：**
 ```
 1. 按用户故事逐条实现，每条故事独立提交
-2. 遵循项目代码规范（见 claude/standards/code-style.md）
+2. 遵循项目代码规范（见 .agents/standards/code-style.md）
 3. 每个模块实现后立即编写对应单元测试
 4. 提交信息格式：
    feat(<模块>): <做了什么>

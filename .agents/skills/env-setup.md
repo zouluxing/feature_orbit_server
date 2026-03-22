@@ -122,7 +122,18 @@ if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
     Write-Host "✅ [E04] Claude Code 已就绪"
 }
 
-# [E05~E09] 仓库、分支、同步、Skills、文档目录（见 setup-env.ps1 完整脚本）
+# [E05] 检测仓库克隆状态
+if (-not (git rev-parse --git-dir 2>$null)) {
+    Write-Host "🔧 [E05] 自动克隆仓库..."
+    Set-Location ..
+    git clone https://github.com/zouluxing/feature_orbit_server.git
+    Set-Location feature_orbit_server
+    Write-Host "✅ [E05] 仓库克隆成功"
+} else {
+    Write-Host "✅ [E05] Git 仓库已就绪: $(git remote get-url origin)"
+}
+
+# [E06~E09] 分支、同步、Skills、文档目录（见 setup-env.ps1 完整脚本）
 ```
 
 ---
@@ -137,11 +148,9 @@ if (-not (Get-Command go -ErrorAction SilentlyContinue)) {
     Write-Host "👉 自动修复选项："
     Write-Host "   方式一：winget install GoLang.Go"
     Write-Host "   方式二：访问 https://golang.org/dl/ 下载安装"
-    # 尝试用 winget 自动安装
     if (Get-Command winget -ErrorAction SilentlyContinue) {
         Write-Host "🔧 [G01] 尝试通过 winget 安装 Go..."
         winget install GoLang.Go --silent
-        # 刷新环境变量
         $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
     }
     if (-not (Get-Command go -ErrorAction SilentlyContinue)) {
@@ -150,7 +159,6 @@ if (-not (Get-Command go -ErrorAction SilentlyContinue)) {
     }
 }
 $goVersion = go version
-# 检查版本 >= 1.21
 $goVer = ($goVersion -match 'go(\d+)\.(\d+)') | Out-Null; $goMajor = [int]$Matches[1]; $goMinor = [int]$Matches[2]
 if ($goMajor -lt 1 -or ($goMajor -eq 1 -and $goMinor -lt 21)) {
     Write-Host "❌ [G01] Go 版本过低（需要 1.21+），当前: $goVersion"
@@ -166,7 +174,6 @@ $goPath = go env GOPATH
 $goProxy = go env GOPROXY
 Write-Host "✅ [G02] GOROOT: $goRoot"
 Write-Host "✅ [G02] GOPATH: $goPath"
-# 推荐设置 GOPROXY（国内加速）
 if ($goProxy -eq "direct" -or $goProxy -eq "") {
     Write-Host "⚠️  [G02] GOPROXY 未配置，设置国内加速镜像..."
     go env -w GOPROXY=https://goproxy.cn,direct
@@ -180,8 +187,8 @@ if ($goProxy -eq "direct" -or $goProxy -eq "") {
 Write-Host "[G03] 检测 Go 模块..."
 if (-not (Test-Path "go.mod")) {
     Write-Host "⚠️  [G03] go.mod 不存在，自动初始化..."
-    go mod init github.com/zouluxing/feature_orbit
-    Write-Host "✅ [G03] go.mod 已初始化"
+    go mod init github.com/zouluxing/feature_orbit_server
+    Write-Host "✅ [G03] go.mod 已初始化: github.com/zouluxing/feature_orbit_server"
 } else {
     $modName = (Get-Content go.mod | Select-String "^module").ToString().Split(" ")[1]
     Write-Host "✅ [G03] Go 模块: $modName"
@@ -195,10 +202,7 @@ Write-Host "✅ [G04] Go 依赖已就绪"
 
 # [G05] 安装代码规范工具
 Write-Host "[G05] 检测 Go 代码规范工具..."
-# gofmt 随 Go 安装自带
 Write-Host "✅ [G05] gofmt 已就绪（Go 内置）"
-
-# golangci-lint
 if (-not (Get-Command golangci-lint -ErrorAction SilentlyContinue)) {
     Write-Host "🔧 [G05] 安装 golangci-lint..."
     go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
@@ -226,7 +230,6 @@ if (-not (Get-Command air -ErrorAction SilentlyContinue)) {
 } else {
     Write-Host "✅ [G07] air 热重载工具已就绪"
 }
-# 生成默认 air 配置（如果不存在）
 if (-not (Test-Path ".air.toml")) {
     air init
     Write-Host "✅ [G07] .air.toml 配置文件已生成"
@@ -267,7 +270,6 @@ try {
 # [S03~S04] 启动基础服务（PostgreSQL + Redis）
 Write-Host "[S03] 检测 PostgreSQL 服务..."
 if (Test-Path "docker-compose.yml") {
-    # 使用项目 docker-compose 启动服务
     $pgRunning = docker compose ps --services --filter "status=running" 2>$null
     if ($pgRunning -notcontains "postgres") {
         Write-Host "🔧 [S03] 启动 PostgreSQL 容器..."
@@ -277,7 +279,6 @@ if (Test-Path "docker-compose.yml") {
     } else {
         Write-Host "✅ [S03] PostgreSQL 容器正在运行"
     }
-
     Write-Host "[S04] 检测 Redis 服务..."
     if ($pgRunning -notcontains "redis") {
         Write-Host "🔧 [S04] 启动 Redis 容器..."
@@ -302,7 +303,6 @@ if (-not (Test-Path ".env")) {
         Write-Host "⚠️  [S05] .env 和 .env.example 均不存在（初始化阶段正常）"
     }
 } else {
-    # 检查关键变量是否存在
     $envContent = Get-Content ".env"
     $requiredVars = @("DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD", "JWT_SECRET", "REDIS_ADDR")
     $missingVars = @()
@@ -313,7 +313,6 @@ if (-not (Test-Path ".env")) {
     }
     if ($missingVars.Count -gt 0) {
         Write-Host "⚠️  [S05] .env 缺少以下关键变量: $($missingVars -join ', ')"
-        Write-Host "   请在 .env 文件中补充以上配置项"
     } else {
         Write-Host "✅ [S05] .env 环境变量文件完整"
     }
@@ -322,11 +321,9 @@ if (-not (Test-Path ".env")) {
 # [S06] 检测数据库连通性
 Write-Host "[S06] 检测数据库连通性..."
 if ((Test-Path ".env") -and (Get-Command docker -ErrorAction SilentlyContinue)) {
-    $retries = 0
-    $maxRetries = 5
-    $connected = $false
+    $retries = 0; $maxRetries = 5; $connected = $false
     while ($retries -lt $maxRetries -and -not $connected) {
-        $result = docker exec feature_orbit_postgres pg_isready -U postgres 2>$null
+        $result = docker exec feature_orbit_server_postgres pg_isready -U postgres 2>$null
         if ($LASTEXITCODE -eq 0) {
             $connected = $true
         } else {
@@ -352,15 +349,12 @@ if (-not (Get-Command migrate -ErrorAction SilentlyContinue)) {
     if (Get-Command migrate -ErrorAction SilentlyContinue) {
         Write-Host "✅ [S07] migrate 工具安装成功"
     } else {
-        Write-Host "⚠️  [S07] migrate 安装后需重启 PowerShell 才能识别，请重新运行脚本"
+        Write-Host "⚠️  [S07] migrate 安装后需重启 PowerShell，请重新运行脚本"
     }
 } else {
     Write-Host "✅ [S07] golang-migrate 工具已就绪"
 }
-# 执行待执行的迁移（如果存在迁移目录）
 if ((Test-Path "migrations") -and (Get-Command migrate -ErrorAction SilentlyContinue)) {
-    Write-Host "🔧 [S07] 执行数据库迁移..."
-    # 从 .env 读取 DB_URL
     $dbUrl = (Get-Content ".env" | Select-String "^DATABASE_URL=(.*)").Matches.Groups[1].Value
     if ($dbUrl) {
         migrate -path migrations -database $dbUrl up
@@ -377,7 +371,6 @@ if ((Test-Path "migrations") -and (Get-Command migrate -ErrorAction SilentlyCont
 
 ```powershell
 # [W01] 检测 PowerShell 版本
-Write-Host "[W01] 检测 PowerShell 版本..."
 $psVer = $PSVersionTable.PSVersion
 if ($psVer.Major -ge 7) {
     Write-Host "✅ [W01] PowerShell $psVer (Core) 已就绪"
@@ -389,7 +382,6 @@ if ($psVer.Major -ge 7) {
 }
 
 # [W02] 检测 Windows Terminal（推荐）
-Write-Host "[W02] 检测 Windows Terminal..."
 if (Get-Command wt -ErrorAction SilentlyContinue) {
     Write-Host "✅ [W02] Windows Terminal 已安装"
 } else {
@@ -397,30 +389,24 @@ if (Get-Command wt -ErrorAction SilentlyContinue) {
 }
 
 # [W03] 检测 make 工具
-Write-Host "[W03] 检测 make 工具..."
 if (-not (Get-Command make -ErrorAction SilentlyContinue)) {
-    Write-Host "🔧 [W03] 安装 make 工具..."
     if (Get-Command scoop -ErrorAction SilentlyContinue) {
         scoop install make
-        Write-Host "✅ [W03] make 通过 Scoop 安装成功"
     } elseif (Get-Command choco -ErrorAction SilentlyContinue) {
         choco install make -y
-        Write-Host "✅ [W03] make 通过 Chocolatey 安装成功"
     } elseif (Get-Command winget -ErrorAction SilentlyContinue) {
         winget install GnuWin32.Make
-        Write-Host "✅ [W03] make 通过 winget 安装成功"
     } else {
         Write-Host "⚠️  [W03] 无法自动安装 make，推荐安装 Scoop: irm get.scoop.sh | iex"
     }
+    Write-Host "✅ [W03] make 已就绪"
 } else {
-    Write-Host "✅ [W03] make $(make --version | head -1) 已就绪"
+    Write-Host "✅ [W03] make 已就绪"
 }
 
 # [W04] Git 行尾符配置
-Write-Host "[W04] 检测 Git 行尾符配置..."
 $autoCrlf = git config --global core.autocrlf
 if ($autoCrlf -ne "true") {
-    Write-Host "🔧 [W04] 设置 Git core.autocrlf = true（Windows 标准）..."
     git config --global core.autocrlf true
     git config --global core.safecrlf warn
     Write-Host "✅ [W04] Git 行尾符已配置 (autocrlf=true)"
@@ -429,26 +415,18 @@ if ($autoCrlf -ne "true") {
 }
 
 # [W05] 检测关键端口占用
-Write-Host "[W05] 检测关键端口可用性..."
-$ports = @{
-    8080 = "Go 应用服务"
-    5432 = "PostgreSQL"
-    6379 = "Redis"
-    9090 = "Prometheus（可选）"
-}
+$ports = @{ 8080 = "Go 应用服务"; 5432 = "PostgreSQL"; 6379 = "Redis"; 9090 = "Prometheus（可选）" }
 $portConflict = $false
 foreach ($port in $ports.Keys) {
     $inUse = netstat -ano | Select-String ":$port " | Where-Object { $_ -match "LISTENING" }
     if ($inUse) {
-        Write-Host "⚠️  [W05] 端口 $port (${ports[$port]}) 已被占用"
+        Write-Host "⚠️  [W05] 端口 $port ($($ports[$port])) 已被占用"
         $portConflict = $true
     } else {
-        Write-Host "✅ [W05] 端口 $port (${ports[$port]}) 可用"
+        Write-Host "✅ [W05] 端口 $port ($($ports[$port])) 可用"
     }
 }
-if ($portConflict) {
-    Write-Host "⚠️  [W05] 部分端口被占用，可能影响服务启动，请检查"
-}
+if ($portConflict) { Write-Host "⚠️  [W05] 部分端口被占用，请检查" }
 ```
 
 ---
@@ -464,11 +442,13 @@ Write-Host "  [基础环境]"
 Write-Host "  Git:             $(git --version)"
 Write-Host "  Node.js:         $(node -v)"
 Write-Host "  Claude Code:     已就绪"
+Write-Host "  仓库:            feature_orbit_server"
 Write-Host "  分支:            $(git branch --show-current)"
 Write-Host "  代码版本:        $(git rev-parse --short HEAD)"
 Write-Host ""
 Write-Host "  [Go 开发环境]"
 Write-Host "  Go:              $(go version)"
+Write-Host "  模块名:          github.com/zouluxing/feature_orbit_server"
 Write-Host "  GOPATH:          $(go env GOPATH)"
 Write-Host "  GOPROXY:         $(go env GOPROXY)"
 Write-Host "  golangci-lint:   已就绪"
@@ -477,7 +457,7 @@ Write-Host "  migrate:         已就绪"
 Write-Host ""
 Write-Host "  [SaaS 服务]"
 Write-Host "  Docker:          $(docker --version)"
-Write-Host "  PostgreSQL:      容器运行中"
+Write-Host "  PostgreSQL:      容器运行中 (feature_orbit_server_postgres)"
 Write-Host "  Redis:           容器运行中"
 Write-Host "  .env 配置:       完整"
 Write-Host ""
@@ -515,7 +495,7 @@ Write-Host "================================================"
 
 ## SKILL_DONE_CRITERIA
 - 所有检查项均通过（E01~E09、G01~G07、S01~S07、W01~W05）
-- Go 版本 >= 1.21，模块已初始化，依赖已下载
+- Go 版本 >= 1.21，模块名为 github.com/zouluxing/feature_orbit_server
 - Docker 运行中，PostgreSQL 和 Redis 容器正常
 - .env 文件存在且关键变量完整
 - 当前位于 develop 分支且代码为最新
