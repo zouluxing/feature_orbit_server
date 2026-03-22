@@ -7,25 +7,18 @@
 
 ## Skills 目录
 
-所有角色均以 Skill 形式定义，放置于 `.claude/skills/` 目录下。
+所有角色均以 Skill 形式定义，放置于 `.agents/skills/` 目录下。
 Claude Code 在执行任务时会自动检索并加载匹配的 Skill。
 
 ```
-.claude/
-├── skills/
-│   ├── requirements-engineer.md  # Skill: 需求工程师
-│   ├── designer.md               # Skill: 系统设计师
-│   ├── developer.md              # Skill: 开发工程师
-│   ├── tester.md                 # Skill: 测试工程师
-│   ├── qa-engineer.md            # Skill: QA 工程师
-│   └── devops-engineer.md        # Skill: 运维工程师
-└── stages/
-    ├── 01-requirements.md
-    ├── 02-design.md
-    ├── 03-development.md
-    ├── 04-testing.md
-    ├── 05-qa.md
-    └── 06-deploy.md
+.agents/
+└── skills/
+    ├── requirements-engineer.md  # Skill: 需求工程师
+    ├── designer.md               # Skill: 系统设计师
+    ├── developer.md              # Skill: 开发工程师
+    ├── tester.md                 # Skill: 测试工程师
+    ├── qa-engineer.md            # Skill: QA 工程师
+    └── devops-engineer.md        # Skill: 运维工程师
 ```
 
 ---
@@ -62,6 +55,21 @@ cd feature_orbit && claude
 # 启动阶段一
 > 我需要开始需求分析阶段
 
-# Claude Code 自动匹配并加载 requirements-engineer skill
+# Claude Code 自动匹配并加载 .agents/skills/requirements-engineer.md
 # 然后按 skill 中定义的步骤逐一执行
 ```
+
+---
+
+## 实施手册
+
+各阶段详细操作步骤请参考：
+
+| 阶段 | 手册文件 |
+|------|----------|
+| 阶段一：需求分析 | `docs/playbook/01-requirements.md` |
+| 阶段二：系统设计 | `docs/playbook/02-design.md` |
+| 阶段三：开发实现 | `docs/playbook/03-development.md` |
+| 阶段四：测试验证 | `docs/playbook/04-testing.md` |
+| 阶段五：质量保障 | `docs/playbook/05-qa.md` |
+| 阶段六：部署上线 | `docs/playbook/06-deploy.md` |
