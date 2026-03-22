@@ -5,6 +5,35 @@
 
 ---
 
+## ⚡ 强制前置规则：环境检查
+
+> **所有阶段任务开始前，必须先执行环境检查。**
+> Claude Code 在接收到任何阶段指令时，自动加载 `.agents/skills/env-setup.md`，
+> 完成全部检查项（E01~E10）并输出「环境准备就绪」后，才允许进入后续阶段。
+
+**一键启动命令（每次开始工作前执行）：**
+
+```bash
+# macOS / Linux
+bash scripts/setup-env.sh
+
+# Windows PowerShell
+PowerShell -ExecutionPolicy Bypass -File scripts/setup-env.ps1
+
+# 或直接启动 Claude Code（自动触发环境检查）
+claude
+```
+
+启动后 Claude Code 自动执行：
+```
+第一步：加载 env-setup Skill → 执行 E01~E10 所有检查
+第二步：发现未就绪项 → 自动修复
+第三步：所有检查通过 → 输出「环境准备就绪」
+第四步：询问用户要开始哪个阶段 → 加载对应 Skill 开始工作
+```
+
+---
+
 ## Skills 目录
 
 所有角色均以 Skill 形式定义，放置于 `.agents/skills/` 目录下。
@@ -13,6 +42,7 @@ Claude Code 在执行任务时会自动检索并加载匹配的 Skill。
 ```
 .agents/
 └── skills/
+    ├── env-setup.md              # ⚡ 环境检查（所有阶段强制前置）
     ├── requirements-engineer.md  # Skill: 需求工程师
     ├── designer.md               # Skill: 系统设计师
     ├── developer.md              # Skill: 开发工程师
@@ -27,6 +57,7 @@ Claude Code 在执行任务时会自动检索并加载匹配的 Skill。
 
 | 阶段 | Skill | 触发关键词 | 产出物 |
 |------|-------|-----------|--------|
+| 0. 环境检查 | `env-setup` | 启动/开始工作/任意阶段指令 | 环境就绪报告 |
 | 1. 需求分析 | `requirements-engineer` | 需求、PRD、用户故事 | PRD、User Stories |
 | 2. 系统设计 | `designer` | 架构、设计、API、数据库 | 架构图、API文档 |
 | 3. 开发实现 | `developer` | 实现、编码、开发、feature | 源码、单元测试 |
@@ -38,25 +69,32 @@ Claude Code 在执行任务时会自动检索并加载匹配的 Skill。
 
 ## 全局规则
 
-1. 严格按阶段顺序执行，上一阶段产出物未完成不得进入下一阶段
-2. 每个阶段完成后创建 PR，由下一阶段角色 Review 后方可合并
-3. 所有产出物统一存放在 `docs/` 对应子目录
-4. 代码提交遵循 Conventional Commits 规范
-5. Skills 可组合使用，例如开发阶段同时加载 `developer` + `tester`
+1. **环境检查前置**：任何阶段开始前必须通过 env-setup Skill 的所有检查项
+2. **严格按阶段顺序执行**，上一阶段产出物未完成不得进入下一阶段
+3. **每个阶段完成后**，创建 PR，由下一阶段角色 Review 后方可合并
+4. **所有产出物**统一存放在 `docs/` 对应子目录
+5. **代码提交**遵循 Conventional Commits 规范
+6. **Skills 可组合使用**，例如开发阶段同时加载 `developer` + `tester`
 
 ---
 
 ## 快速启动
 
 ```bash
-# 进入项目，Claude Code 自动加载 CLAUDE.md
-cd feature_orbit && claude
+# 1. 进入项目目录
+cd feature_orbit
 
-# 启动阶段一
-> 我需要开始需求分析阶段
+# 2. 运行环境检查脚本（自动检测并修复环境）
+bash scripts/setup-env.sh        # macOS/Linux
+# 或
+PowerShell -ExecutionPolicy Bypass -File scripts/setup-env.ps1  # Windows
 
-# Claude Code 自动匹配并加载 .agents/skills/requirements-engineer.md
-# 然后按 skill 中定义的步骤逐一执行
+# 3. 启动 Claude Code
+claude
+
+# 4. 告诉 Claude Code 你要做什么
+> 开始需求分析阶段
+# Claude Code 自动检查环境 → 加载需求工程师 Skill → 开始引导
 ```
 
 ---
