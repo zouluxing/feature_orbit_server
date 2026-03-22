@@ -1,0 +1,11 @@
+DROP TRIGGER IF EXISTS trg_oauth2_clients_updated_at ON oauth2_clients;
+DROP TRIGGER IF EXISTS trg_users_updated_at ON users;
+DROP FUNCTION IF EXISTS set_updated_at();
+DROP TABLE IF EXISTS oauth2_tokens CASCADE;
+DROP TABLE IF EXISTS oauth2_authorization_codes CASCADE;
+DROP TABLE IF EXISTS oauth2_clients CASCADE;
+DROP TABLE IF EXISTS role_permissions CASCADE;
+DROP TABLE IF EXISTS user_roles CASCADE;
+DROP TABLE IF EXISTS permissions CASCADE;
+DROP TABLE IF EXISTS roles CASCADE;
+DROP TABLE IF EXISTS users CASCADE;

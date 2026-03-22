@@ -1,0 +1,31 @@
+app:
+  name: ums
+  env: production
+  port: 8081
+  debug: false
+
+db:
+  url: "${UMS_DB_URL}"
+  max_open_conns: 25
+  max_idle_conns: 10
+
+redis:
+  addr: "${UMS_REDIS_ADDR}"
+  password: "${UMS_REDIS_PASSWORD}"
+  db: 1
+
+jwt:
+  private_key_path: "/run/secrets/ums_rsa_private.pem"
+  public_key_path:  "/run/secrets/ums_rsa_public.pem"
+  access_ttl: "15m"
+  refresh_ttl: "168h"
+  issuer: "ums"
+  key_id: "ums-rsa-1"
+
+oauth2:
+  auth_code_ttl: "10m"
+
+rate_limit:
+  login_max_attempts: 5
+  login_window_secs: 300
+  lock_duration_mins: 30
