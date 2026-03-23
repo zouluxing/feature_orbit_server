@@ -18,7 +18,6 @@ import (
 
 	"github.com/zouluxing/ums/internal/config"
 	"github.com/zouluxing/ums/internal/handler"
-	"github.com/zouluxing/ums/internal/model"
 	"github.com/zouluxing/ums/internal/repository"
 	"github.com/zouluxing/ums/internal/service"
 	"github.com/zouluxing/ums/pkg/crypto"
@@ -35,7 +34,7 @@ func main() {
 		log.Fatalf("load config: %v", err)
 	}
 
-	// ── RSA key pair ──────────────────────────────────────────────────────────
+	// ── RSA key pair ─────────────────────────────────────────────────────────
 	if cfg.JWT.PrivateKeyPath == "" {
 		cfg.JWT.PrivateKeyPath = "configs/ums_rsa_private.pem"
 		cfg.JWT.PublicKeyPath = "configs/ums_rsa_public.pem"
@@ -57,7 +56,7 @@ func main() {
 		log.Fatalf("jwt manager: %v", err)
 	}
 
-	// ── MFA encryption (RISK-001) ─────────────────────────────────────────────
+	// ── MFA encryption ────────────────────────────────────────────────────────
 	var mfaEnc service.MFAEncryptor
 	if mfaKeyHex := os.Getenv("UMS_MFA_ENCRYPTION_KEY"); mfaKeyHex != "" {
 		enc, err := crypto.NewAESEncryptor(mfaKeyHex)
@@ -65,12 +64,12 @@ func main() {
 			log.Fatalf("MFA encryptor init: %v", err)
 		}
 		mfaEnc = enc
-		log.Println("[security] MFA secrets will be encrypted at rest (AES-256-GCM)")
+		log.Println("[security] MFA secrets encrypted at rest (AES-256-GCM)")
 	} else {
 		if cfg.App.Env == "production" {
 			log.Fatal("[security] UMS_MFA_ENCRYPTION_KEY must be set in production")
 		}
-		log.Println("[WARN] UMS_MFA_ENCRYPTION_KEY not set — MFA secrets stored in plaintext (dev only)")
+		log.Println("[WARN] UMS_MFA_ENCRYPTION_KEY not set — MFA secrets in plaintext (dev only)")
 	}
 
 	// ── PostgreSQL ────────────────────────────────────────────────────────────
@@ -87,17 +86,16 @@ func main() {
 	sqlDB.SetMaxIdleConns(cfg.DB.MaxIdleConns)
 	sqlDB.SetConnMaxLifetime(30 * time.Minute)
 
-	// 开发模式自动建表
-	if cfg.App.Env == "development" {
-		if err := db.AutoMigrate(
-			&model.User{}, &model.Role{}, &model.Permission{},
-			&model.UserRole{}, &model.RolePermission{},
-			&model.OAuth2Client{}, &model.OAuth2AuthCode{}, &model.OAuth2Token{},
-		); err != nil {
-			log.Fatalf("auto-migrate: %v", err)
-		}
-		seedSystemData(db)
+	// 数据库初始化策略：不使用 GORM AutoMigrate，完全依赖 SQL 迁移文件
+	// docker-entrypoint-initdb.d 在容器首次创建时执行 migrations/000001_init.up.sql
+	// 应用启动时只做连通性验证，不重复执行 DDL
+	if err := verifyDatabaseReady(db); err != nil {
+		log.Fatalf("database not ready: %v", err)
 	}
+	log.Println("database schema verified")
+
+	// seed 基础数据（幂等，只插入缺少的部分）
+	seedSystemData(db)
 
 	// ── Redis ─────────────────────────────────────────────────────────────────
 	rdb := redis.NewClient(&redis.Options{
@@ -150,14 +148,12 @@ func main() {
 
 	v1 := r.Group("/api/v1")
 
-	// Auth
 	auth := v1.Group("/auth")
 	auth.POST("/register", authH.Register)
 	auth.POST("/login", authH.Login)
 	auth.POST("/token/refresh", authH.RefreshToken)
 	auth.POST("/logout", handler.JWTAuth(jwtMgr, cacheSvc), authH.Logout)
 
-	// Users
 	authMW  := handler.JWTAuth(jwtMgr, cacheSvc)
 	adminMW := handler.RequireRole("admin")
 	users := v1.Group("/users", authMW)
@@ -177,7 +173,6 @@ func main() {
 	users.DELETE("/:uuid/roles/:role_id", adminMW, userH.RemoveRole)
 	users.GET("/:uuid/permissions", adminMW, userH.GetUserPermissions)
 
-	// Roles & Permissions
 	roles := v1.Group("/roles", authMW, adminMW)
 	roles.GET("", permH.ListRoles)
 	roles.POST("", permH.CreateRole)
@@ -185,7 +180,6 @@ func main() {
 	roles.POST("/:id/permissions", permH.SetRolePermissions)
 	v1.GET("/permissions", authMW, adminMW, permH.ListPermissions)
 
-	// OAuth2
 	oauth2 := v1.Group("/oauth2")
 	oauth2.GET("/authorize", handler.JWTAuthWithUserID(jwtMgr, cacheSvc), oauth2H.Authorize)
 	oauth2.POST("/token", oauth2H.Token)
@@ -220,31 +214,58 @@ func main() {
 	log.Println("UMS stopped.")
 }
 
+// verifyDatabaseReady 检查关键表是否存在，不执行任何 DDL。
+// 表不存在时说明迁移文件还没执行，给出明确错误提示而不是暴庋重启。
+func verifyDatabaseReady(db *gorm.DB) error {
+	requiredTables := []string{"users", "roles", "permissions", "user_roles", "role_permissions"}
+	for _, table := range requiredTables {
+		var count int64
+		result := db.Raw(
+			"SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public' AND table_name=?",
+			table,
+		).Scan(&count)
+		if result.Error != nil {
+			return fmt.Errorf("check table %s: %w", table, result.Error)
+		}
+		if count == 0 {
+			return fmt.Errorf(
+				"table '%s' not found — migrations may not have run yet.\n"+
+					"If this is a fresh start, stop the ums container, delete the postgres volume, "+
+					"and restart: docker compose down -v && docker compose up -d",
+				table,
+			)
+		}
+	}
+	return nil
+}
+
+// seedSystemData 必须幂等：只插入不存在的行，不修改已有数据。
 func seedSystemData(db *gorm.DB) {
-	perms := []model.Permission{
-		{Resource: "user", Action: "create"}, {Resource: "user", Action: "read"},
-		{Resource: "user", Action: "update"}, {Resource: "user", Action: "delete"},
-		{Resource: "role", Action: "create"}, {Resource: "role", Action: "read"},
-		{Resource: "role", Action: "update"}, {Resource: "role", Action: "delete"},
-		{Resource: "oauth2_client", Action: "create"}, {Resource: "oauth2_client", Action: "read"},
+	type perm struct{ Resource, Action, Description string }
+	perms := []perm{
+		{"user", "create", "创建用户"}, {"user", "read", "查看用户"},
+		{"user", "update", "修改用户"}, {"user", "delete", "删除用户"},
+		{"role", "create", "创建角色"}, {"role", "read", "查看角色"},
+		{"role", "update", "修改角色"}, {"role", "delete", "删除角色"},
+		{"oauth2_client", "create", "注册OAuth应用"}, {"oauth2_client", "read", "查看OAuth应用"},
 	}
-	for i := range perms {
-		db.Where(model.Permission{Resource: perms[i].Resource, Action: perms[i].Action}).
-			FirstOrCreate(&perms[i])
+	for _, p := range perms {
+		db.Exec(
+			"INSERT INTO permissions (resource, action, description) VALUES (?,?,?) ON CONFLICT DO NOTHING",
+			p.Resource, p.Action, p.Description,
+		)
 	}
-	descFn := func(s string) *string { return &s }
-	for _, role := range []model.Role{
-		{Name: "admin",  IsSystem: true, Description: descFn("超级管理员")},
-		{Name: "editor", IsSystem: true, Description: descFn("编辑者")},
-		{Name: "viewer", IsSystem: true, Description: descFn("只读用户")},
-	} {
-		r := role
-		db.Where(model.Role{Name: r.Name}).FirstOrCreate(&r)
+	type role struct{ Name, Description string }
+	for _, r := range []role{{"admin", "超级管理员"}, {"editor", "编辑者"}, {"viewer", "只读用户"}} {
+		db.Exec(
+			"INSERT INTO roles (name, description, is_system) VALUES (?,?,TRUE) ON CONFLICT DO NOTHING",
+			r.Name, r.Description,
+		)
 	}
-	var adminRole model.Role
-	if err := db.First(&adminRole, "name = ?", "admin").Error; err == nil {
-		var allPerms []model.Permission
-		db.Find(&allPerms)
-		db.Model(&adminRole).Association("Permissions").Replace(allPerms)
-	}
+	// admin 角色拥有所有权限
+	db.Exec(`
+		INSERT INTO role_permissions (role_id, permission_id)
+		SELECT r.id, p.id FROM roles r, permissions p WHERE r.name = 'admin'
+		ON CONFLICT DO NOTHING
+	`)
 }

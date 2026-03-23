@@ -14,7 +14,8 @@ services:
       - "5433:5432"
     volumes:
       - ums_postgres_data:/var/lib/postgresql/data
-      - ./migrations:/docker-entrypoint-initdb.d
+      # 迁移 SQL 在容器首次创建时自动执行（只进行一次）
+      - ./migrations:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s
