@@ -10,11 +10,14 @@ const (
 	UserStatusLocked   UserStatus = 3
 )
 
+// User GORM 模型。
+// uniqueIndex 的约束名显式指定，与 migrations/000001_init.up.sql 中的命名保持一致，
+// 避免 GORM AutoMigrate 生成 uni_xxx 与 SQL 中 uq_xxx 冲突。
 type User struct {
 	ID               int64      `gorm:"primaryKey;autoIncrement"`
-	UUID             string     `gorm:"type:uuid;uniqueIndex;not null"`
-	Email            string     `gorm:"type:varchar(255);uniqueIndex;not null"`
-	Username         string     `gorm:"type:varchar(64);uniqueIndex;not null"`
+	UUID             string     `gorm:"type:varchar(36);uniqueIndex:uq_users_uuid;not null"`
+	Email            string     `gorm:"type:varchar(255);uniqueIndex:uq_users_email;not null"`
+	Username         string     `gorm:"type:varchar(64);uniqueIndex:uq_users_username;not null"`
 	PasswordHash     string     `gorm:"type:varchar(255);not null"`
 	Phone            *string    `gorm:"type:varchar(32)"`
 	AvatarURL        *string    `gorm:"type:text"`

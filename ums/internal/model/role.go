@@ -2,9 +2,11 @@ package model
 
 import "time"
 
+// Role GORM 模型。
+// uniqueIndex 约束名显式指定，与 migrations SQL 一致。
 type Role struct {
 	ID          int64        `gorm:"primaryKey;autoIncrement"`
-	Name        string       `gorm:"type:varchar(64);uniqueIndex;not null"`
+	Name        string       `gorm:"type:varchar(64);uniqueIndex:uq_roles_name;not null"`
 	Description *string      `gorm:"type:text"`
 	IsSystem    bool         `gorm:"not null;default:false"`
 	CreatedAt   time.Time    `gorm:"not null;autoCreateTime"`
@@ -16,8 +18,8 @@ func (Role) TableName() string { return "roles" }
 
 type Permission struct {
 	ID          int64   `gorm:"primaryKey;autoIncrement"`
-	Resource    string  `gorm:"type:varchar(64);not null;uniqueIndex:uq_resource_action"`
-	Action      string  `gorm:"type:varchar(32);not null;uniqueIndex:uq_resource_action"`
+	Resource    string  `gorm:"type:varchar(64);not null;uniqueIndex:uq_permissions_resource_action"`
+	Action      string  `gorm:"type:varchar(32);not null;uniqueIndex:uq_permissions_resource_action"`
 	Description *string `gorm:"type:text"`
 }
 
@@ -40,7 +42,7 @@ func (RolePermission) TableName() string { return "role_permissions" }
 
 type OAuth2Client struct {
 	ID               int64      `gorm:"primaryKey;autoIncrement"`
-	ClientID         string     `gorm:"type:varchar(64);uniqueIndex;not null"`
+	ClientID         string     `gorm:"type:varchar(64);uniqueIndex:uq_oauth2_clients_client_id;not null"`
 	ClientSecretHash string     `gorm:"type:varchar(255);not null"`
 	Name             string     `gorm:"type:varchar(128);not null"`
 	RedirectURIs     string     `gorm:"type:jsonb;not null"`
@@ -57,7 +59,7 @@ func (OAuth2Client) TableName() string { return "oauth2_clients" }
 
 type OAuth2AuthCode struct {
 	ID                  int64     `gorm:"primaryKey;autoIncrement"`
-	Code                string    `gorm:"type:varchar(128);uniqueIndex;not null"`
+	Code                string    `gorm:"type:varchar(128);uniqueIndex:uq_auth_codes_code;not null"`
 	ClientID            string    `gorm:"type:varchar(64);not null;index"`
 	UserID              int64     `gorm:"not null"`
 	RedirectURI         string    `gorm:"type:text;not null"`
@@ -72,11 +74,11 @@ func (OAuth2AuthCode) TableName() string { return "oauth2_authorization_codes" }
 
 type OAuth2Token struct {
 	ID           int64      `gorm:"primaryKey;autoIncrement"`
-	JTI          string     `gorm:"type:varchar(64);uniqueIndex;not null"`
+	JTI          string     `gorm:"type:varchar(64);uniqueIndex:uq_oauth2_tokens_jti;not null"`
 	ClientID     string     `gorm:"type:varchar(64);not null;index"`
 	UserID       int64      `gorm:"not null;index"`
 	Scopes       string     `gorm:"type:jsonb;not null"`
-	RefreshToken string     `gorm:"type:varchar(512);uniqueIndex;not null"`
+	RefreshToken string     `gorm:"type:varchar(512);uniqueIndex:uq_oauth2_tokens_refresh_token;not null"`
 	ExpiresAt    time.Time  `gorm:"not null"`
 	RevokedAt    *time.Time
 	CreatedAt    time.Time  `gorm:"not null;autoCreateTime"`
