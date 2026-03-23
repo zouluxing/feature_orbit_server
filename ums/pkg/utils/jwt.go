@@ -55,8 +55,7 @@ func NewJWTManager(privPath, pubPath, issuer, keyID string, accessTTL, refreshTT
 }
 
 func (m *JWTManager) IssueAccessToken(userUUID, email string, roles, scopes []string) (string, string, error) {
-	jti := NewUUID()
-	now := time.Now()
+	jti := NewUUID(); now := time.Now()
 	claims := UMSClaims{
 		Email: email, Roles: roles, Scopes: scopes,
 		RegisteredClaims: jwt.RegisteredClaims{
@@ -83,8 +82,8 @@ func (m *JWTManager) VerifyAccessToken(tokenStr string) (*UMSClaims, error) {
 
 func (m *JWTManager) PublicKeyN() string { return base64.RawURLEncoding.EncodeToString(m.publicKey.N.Bytes()) }
 func (m *JWTManager) PublicKeyE() string { e := big.NewInt(int64(m.publicKey.E)); return base64.RawURLEncoding.EncodeToString(e.Bytes()) }
-func (m *JWTManager) KeyID() string           { return m.keyID }
-func (m *JWTManager) AccessTTL() time.Duration { return m.accessTTL }
+func (m *JWTManager) KeyID() string            { return m.keyID }
+func (m *JWTManager) AccessTTL() time.Duration  { return m.accessTTL }
 
 func GenerateRSAKeyPairFiles(privPath, pubPath string) error {
 	privKey, err := rsa.GenerateKey(rand.Reader, 2048)
