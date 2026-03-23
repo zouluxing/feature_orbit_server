@@ -21,6 +21,7 @@ import (
 	"github.com/zouluxing/ums/internal/model"
 	"github.com/zouluxing/ums/internal/repository"
 	"github.com/zouluxing/ums/internal/service"
+	"github.com/zouluxing/ums/pkg/crypto"
 	"github.com/zouluxing/ums/pkg/utils"
 )
 
@@ -34,6 +35,7 @@ func main() {
 		log.Fatalf("load config: %v", err)
 	}
 
+	// ── RSA key pair ──────────────────────────────────────────────────────────
 	if cfg.JWT.PrivateKeyPath == "" {
 		cfg.JWT.PrivateKeyPath = "configs/ums_rsa_private.pem"
 		cfg.JWT.PublicKeyPath = "configs/ums_rsa_public.pem"
@@ -54,6 +56,26 @@ func main() {
 		log.Fatalf("jwt manager: %v", err)
 	}
 
+	// ── MFA encryption (RISK-001) ─────────────────────────────────────────────
+	// Production: set UMS_MFA_ENCRYPTION_KEY to a 64-char hex string.
+	// Generate with: openssl rand -hex 32
+	var mfaEnc service.MFAEncryptor
+	mfaKeyHex := os.Getenv("UMS_MFA_ENCRYPTION_KEY")
+	if mfaKeyHex != "" {
+		enc, err := crypto.NewAESEncryptor(mfaKeyHex)
+		if err != nil {
+			log.Fatalf("MFA encryptor init: %v", err)
+		}
+		mfaEnc = enc
+		log.Println("[security] MFA secrets will be encrypted at rest (AES-256-GCM)")
+	} else {
+		if cfg.App.Env == "production" {
+			log.Fatal("[security] UMS_MFA_ENCRYPTION_KEY must be set in production")
+		}
+		log.Println("[WARN] UMS_MFA_ENCRYPTION_KEY not set — MFA secrets stored in plaintext (dev only)")
+	}
+
+	// ── PostgreSQL ────────────────────────────────────────────────────────────
 	gormCfg := &gorm.Config{}
 	if !cfg.App.Debug {
 		gormCfg.Logger = logger.Default.LogMode(logger.Silent)
@@ -78,6 +100,7 @@ func main() {
 		seedSystemData(db)
 	}
 
+	// ── Redis ─────────────────────────────────────────────────────────────────
 	rdb := redis.NewClient(&redis.Options{
 		Addr:     cfg.Redis.Addr,
 		Password: cfg.Redis.Password,
@@ -87,14 +110,15 @@ func main() {
 		log.Fatalf("connect redis: %v", err)
 	}
 
+	// ── Wire dependencies ─────────────────────────────────────────────────────
 	cacheSvc  := service.NewCacheService(rdb)
 	userRepo  := repository.NewUserRepository(db)
 	roleRepo  := repository.NewRoleRepository(db)
 	permRepo  := repository.NewPermissionRepository(db)
 	oauthRepo := repository.NewOAuth2Repository(db)
 
-	authSvc   := service.NewAuthService(userRepo, cacheSvc, jwtMgr, cfg)
-	userSvc   := service.NewUserService(userRepo, roleRepo)
+	authSvc   := service.NewAuthService(userRepo, cacheSvc, jwtMgr, cfg, mfaEnc)
+	userSvc   := service.NewUserService(userRepo, roleRepo, mfaEnc)
 	permSvc   := service.NewPermissionService(roleRepo, permRepo, userRepo)
 	oauth2Svc := service.NewOAuth2Service(oauthRepo, userRepo, jwtMgr, cfg)
 
@@ -103,6 +127,7 @@ func main() {
 	permH   := handler.NewPermissionHandler(permSvc)
 	oauth2H := handler.NewOAuth2Handler(oauth2Svc, jwtMgr, authSvc)
 
+	// ── Router ────────────────────────────────────────────────────────────────
 	if !cfg.App.Debug {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -213,12 +238,13 @@ func seedSystemData(db *gorm.DB) {
 		db.Where(model.Permission{Resource: perms[i].Resource, Action: perms[i].Action}).FirstOrCreate(&perms[i])
 	}
 	desc := func(s string) *string { return &s }
-	for _, r := range []model.Role{
+	for _, role := range []model.Role{
 		{Name: "admin", IsSystem: true, Description: desc("超级管理员")},
 		{Name: "editor", IsSystem: true, Description: desc("编辑者")},
 		{Name: "viewer", IsSystem: true, Description: desc("只读用户")},
 	} {
-		db.Where(model.Role{Name: r.Name}).FirstOrCreate(&r)
+		role := role
+		db.Where(model.Role{Name: role.Name}).FirstOrCreate(&role)
 	}
 	var adminRole model.Role
 	db.First(&adminRole, "name = ?", "admin")
