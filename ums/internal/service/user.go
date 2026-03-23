@@ -14,6 +14,14 @@ import (
 	"github.com/zouluxing/ums/pkg/utils"
 )
 
+// MFAEncryptor is satisfied by pkg/crypto.AESEncryptor.
+// Defined as an interface here to keep the service layer testable without
+// importing the crypto package directly (avoids test key management).
+type MFAEncryptor interface {
+	Encrypt(plaintext string) (string, error)
+	Decrypt(ciphertext string) (string, error)
+}
+
 type UserService interface {
 	GetByUUID(ctx context.Context, uuid string) (*dto.UserInfo, error)
 	List(ctx context.Context, req dto.UserListRequest) (*dto.UserListResponse, error)
@@ -33,10 +41,16 @@ type UserService interface {
 type userService struct {
 	userRepo repository.UserRepository
 	roleRepo repository.RoleRepository
+	// enc is optional: when nil, MFA secrets are stored in plaintext (dev-only).
+	// Production deployments MUST set UMS_MFA_ENCRYPTION_KEY.
+	enc MFAEncryptor
 }
 
-func NewUserService(userRepo repository.UserRepository, roleRepo repository.RoleRepository) UserService {
-	return &userService{userRepo: userRepo, roleRepo: roleRepo}
+// NewUserService creates a UserService.
+// Pass a non-nil enc (pkg/crypto.AESEncryptor) in production to encrypt MFA secrets at rest.
+// Passing nil is accepted only for development; a warning is logged at startup by main.go.
+func NewUserService(userRepo repository.UserRepository, roleRepo repository.RoleRepository, enc MFAEncryptor) UserService {
+	return &userService{userRepo: userRepo, roleRepo: roleRepo, enc: enc}
 }
 
 func (s *userService) GetByUUID(ctx context.Context, uuid string) (*dto.UserInfo, error) {
@@ -119,24 +133,52 @@ func (s *userService) GetPermissions(ctx context.Context, uuid string) ([]dto.Pe
 	}
 	return result, nil
 }
+
+// EnableMFA generates a TOTP secret, encrypts it with AES-256-GCM (if enc
+// is configured), persists the ciphertext, and returns the provisioning URI.
 func (s *userService) EnableMFA(ctx context.Context, uuid string) (*dto.EnableMFAResponse, error) {
 	u, err := s.userRepo.FindByUUID(ctx, uuid)
 	if err != nil || u == nil { return nil, apperr.ErrUserNotFound }
 	if u.MFAEnabled { return nil, apperr.ErrMFAAlreadyEnabled }
+
 	key, err := totp.Generate(totp.GenerateOpts{Issuer: "UMS", AccountName: u.Email})
 	if err != nil { return nil, apperr.ErrInternal }
-	secret := key.Secret()
-	u.MFASecret = &secret
+
+	plainSecret := key.Secret()
+	storedSecret := plainSecret
+
+	// Encrypt the TOTP secret at rest when an encryptor is available.
+	if s.enc != nil {
+		encrypted, err := s.enc.Encrypt(plainSecret)
+		if err != nil { return nil, apperr.ErrInternal }
+		storedSecret = encrypted
+	}
+
+	u.MFASecret = &storedSecret
 	if err := s.userRepo.Update(ctx, u); err != nil { return nil, apperr.ErrInternal }
+
 	qrURL := fmt.Sprintf("https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=%s", key.URL())
-	return &dto.EnableMFAResponse{Secret: secret, OTPAuthURI: key.URL(), QRCodeURL: qrURL}, nil
+	return &dto.EnableMFAResponse{Secret: plainSecret, OTPAuthURI: key.URL(), QRCodeURL: qrURL}, nil
 }
+
+// DisableMFA verifies the TOTP code against the (decrypted) secret, then
+// clears the MFA fields.
 func (s *userService) DisableMFA(ctx context.Context, uuid, code string) error {
 	u, err := s.userRepo.FindByUUID(ctx, uuid)
 	if err != nil || u == nil { return apperr.ErrUserNotFound }
 	if !u.MFAEnabled || u.MFASecret == nil { return apperr.ErrMFACodeInvalid }
-	if !totp.Validate(code, *u.MFASecret) { return apperr.ErrMFACodeInvalid }
-	u.MFAEnabled = false; u.MFASecret = nil
+
+	secret := *u.MFASecret
+	// Decrypt if an encryptor is configured.
+	if s.enc != nil {
+		decrypted, err := s.enc.Decrypt(secret)
+		if err != nil { return apperr.ErrInternal }
+		secret = decrypted
+	}
+
+	if !totp.Validate(code, secret) { return apperr.ErrMFACodeInvalid }
+	u.MFAEnabled = false
+	u.MFASecret = nil
 	return s.userRepo.Update(ctx, u)
 }
 
@@ -151,5 +193,6 @@ func toUserInfo(u *model.User) *dto.UserInfo {
 			if !seen[key] { seen[key] = true; perms = append(perms, key) }
 		}
 	}
-	return &dto.UserInfo{UUID: u.UUID, Email: u.Email, Username: u.Username, Phone: u.Phone, AvatarURL: u.AvatarURL, Status: int8(u.Status), MFAEnabled: u.MFAEnabled, Roles: roles, Permissions: perms}
+	return &dto.UserInfo{UUID: u.UUID, Email: u.Email, Username: u.Username, Phone: u.Phone,
+		AvatarURL: u.AvatarURL, Status: int8(u.Status), MFAEnabled: u.MFAEnabled, Roles: roles, Permissions: perms}
 }

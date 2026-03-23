@@ -28,10 +28,12 @@ type authService struct {
 	cache    CacheService
 	jwt      *utils.JWTManager
 	cfg      *config.Config
+	// enc decrypts MFA secrets stored with AES-GCM; may be nil in dev mode.
+	enc MFAEncryptor
 }
 
-func NewAuthService(userRepo repository.UserRepository, cache CacheService, jwt *utils.JWTManager, cfg *config.Config) AuthService {
-	return &authService{userRepo: userRepo, cache: cache, jwt: jwt, cfg: cfg}
+func NewAuthService(userRepo repository.UserRepository, cache CacheService, jwt *utils.JWTManager, cfg *config.Config, enc MFAEncryptor) AuthService {
+	return &authService{userRepo: userRepo, cache: cache, jwt: jwt, cfg: cfg, enc: enc}
 }
 
 func (s *authService) Register(ctx context.Context, req dto.RegisterRequest) (*dto.RegisterResponse, error) {
@@ -46,39 +48,25 @@ func (s *authService) Register(ctx context.Context, req dto.RegisterRequest) (*d
 		return nil, apperr.ErrDuplicateUser
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), 12)
-	if err != nil {
-		return nil, apperr.ErrInternal
-	}
+	if err != nil { return nil, apperr.ErrInternal }
 	u := &model.User{UUID: utils.NewUUID(), Email: req.Email, Username: req.Username, PasswordHash: string(hash), Status: model.UserStatusActive}
-	if err := s.userRepo.Create(ctx, u); err != nil {
-		return nil, apperr.ErrInternal
-	}
+	if err := s.userRepo.Create(ctx, u); err != nil { return nil, apperr.ErrInternal }
 	return &dto.RegisterResponse{UserUUID: u.UUID, Email: u.Email}, nil
 }
 
 func (s *authService) Login(ctx context.Context, req dto.LoginRequest) (*dto.TokenResponse, error) {
 	ipKey := fmt.Sprintf("ums:ratelimit:login:%s", req.Email)
 	locked, err := s.cache.Exists(ctx, fmt.Sprintf("ums:lock:%s", req.Email))
-	if err != nil {
-		return nil, apperr.ErrInternal
-	}
-	if locked {
-		return nil, apperr.ErrAccountLocked
-	}
+	if err != nil { return nil, apperr.ErrInternal }
+	if locked { return nil, apperr.ErrAccountLocked }
 	user, err := s.userRepo.FindByEmail(ctx, req.Email)
-	if err != nil {
-		return nil, apperr.ErrInternal
-	}
+	if err != nil { return nil, apperr.ErrInternal }
 	if user == nil {
 		s.cache.Incr(ctx, ipKey, time.Duration(s.cfg.RateLimit.LoginWindowSecs)*time.Second)
 		return nil, apperr.ErrInvalidCredentials
 	}
-	if user.Status == model.UserStatusLocked {
-		return nil, apperr.ErrAccountLocked
-	}
-	if user.Status == model.UserStatusDisabled {
-		return nil, apperr.ErrForbidden
-	}
+	if user.Status == model.UserStatusLocked { return nil, apperr.ErrAccountLocked }
+	if user.Status == model.UserStatusDisabled { return nil, apperr.ErrForbidden }
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
 		count, _ := s.userRepo.IncrFailedLogin(ctx, user.ID)
 		if count >= s.cfg.RateLimit.LoginMaxAttempts {
@@ -90,12 +78,12 @@ func (s *authService) Login(ctx context.Context, req dto.LoginRequest) (*dto.Tok
 	}
 	if user.MFAEnabled {
 		if req.MFACode == "" { return nil, apperr.ErrMFARequired }
-		if !verifyTOTP(user.MFASecret, req.MFACode) { return nil, apperr.ErrMFACodeInvalid }
+		if !s.verifyTOTP(user.MFASecret, req.MFACode) { return nil, apperr.ErrMFACodeInvalid }
 	}
 	s.userRepo.ResetFailedLogin(ctx, user.ID)
 	s.cache.Del(ctx, ipKey)
 	s.userRepo.UpdateLastLogin(ctx, user.ID, time.Now())
-	return s.issueTokenPair(ctx, user, nil)
+	return s.issueTokenPair(user, nil)
 }
 
 func (s *authService) RefreshToken(ctx context.Context, refreshToken string) (*dto.TokenResponse, error) {
@@ -108,14 +96,14 @@ func (s *authService) RefreshToken(ctx context.Context, refreshToken string) (*d
 	if err != nil || user == nil { return nil, apperr.ErrUserNotFound }
 	if user.Status != model.UserStatusActive { return nil, apperr.ErrForbidden }
 	s.cache.Set(ctx, "ums:revoked:refresh:"+rhash, "1", s.cfg.JWT.RefreshTTL)
-	return s.issueTokenPair(ctx, user, nil)
+	return s.issueTokenPair(user, nil)
 }
 
 func (s *authService) Logout(ctx context.Context, jti string) error {
 	return s.cache.Set(ctx, "ums:blacklist:"+jti, "1", s.cfg.JWT.AccessTTL+time.Minute)
 }
 
-func (s *authService) issueTokenPair(_ context.Context, user *model.User, scopes []string) (*dto.TokenResponse, error) {
+func (s *authService) issueTokenPair(user *model.User, scopes []string) (*dto.TokenResponse, error) {
 	roles := make([]string, 0, len(user.Roles))
 	for _, r := range user.Roles { roles = append(roles, r.Name) }
 	accessToken, _, err := s.jwt.IssueAccessToken(user.UUID, user.Email, roles, scopes)
@@ -125,7 +113,16 @@ func (s *authService) issueTokenPair(_ context.Context, user *model.User, scopes
 	return &dto.TokenResponse{AccessToken: accessToken, RefreshToken: refreshToken, ExpiresIn: int(s.cfg.JWT.AccessTTL.Seconds()), TokenType: "Bearer"}, nil
 }
 
-func verifyTOTP(secret *string, code string) bool {
-	if secret == nil || *secret == "" { return false }
-	return totp.Validate(code, *secret)
+// verifyTOTP decrypts the stored MFA secret (if enc is configured) before
+// running TOTP validation. This ensures secrets encrypted at rest are
+// transparently handled during login.
+func (s *authService) verifyTOTP(storedSecret *string, code string) bool {
+	if storedSecret == nil || *storedSecret == "" { return false }
+	secret := *storedSecret
+	if s.enc != nil {
+		decrypted, err := s.enc.Decrypt(secret)
+		if err != nil { return false }
+		secret = decrypted
+	}
+	return totp.Validate(code, secret)
 }
