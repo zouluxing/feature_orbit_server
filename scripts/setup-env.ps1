@@ -1,6 +1,6 @@
 # ================================================
 # feature_orbit_server 环境自动检测与准备脚本 (Windows)
-# 版本: 2.0.0
+# 版本: 2.1.0
 # 平台: Windows + Go SaaS 开发
 # 用法: PowerShell -ExecutionPolicy Bypass -File scripts/setup-env.ps1
 # ================================================
@@ -23,9 +23,20 @@ function Refresh-EnvPath {
                 [System.Environment]::GetEnvironmentVariable("Path", "User")
 }
 
+# 将指定路径持久化写入用户 PATH（若不存在）
+function Add-ToUserPath {
+    param([string]$NewPath)
+    $current = [System.Environment]::GetEnvironmentVariable("Path", "User")
+    if ($current -notlike "*$NewPath*") {
+        [System.Environment]::SetEnvironmentVariable("Path", "$current;$NewPath", "User")
+        $env:Path += ";$NewPath"
+        Log-Fix "已将 $NewPath 写入用户 PATH（永久生效）"
+    }
+}
+
 Write-Host ""
 Write-Host "================================================" -ForegroundColor Blue
-Write-Host "   feature_orbit_server 环境自动检测与准备 v2.0" -ForegroundColor Blue
+Write-Host "   feature_orbit_server 环境自动检测与准备 v2.1" -ForegroundColor Blue
 Write-Host "   平台: Windows | 语言: Go | 类型: SaaS" -ForegroundColor Blue
 Write-Host "================================================" -ForegroundColor Blue
 Write-Host ""
@@ -232,9 +243,7 @@ if (Get-Command go -ErrorAction SilentlyContinue) {
     $goBin = "$(go env GOPATH)\bin"
     if ($env:Path -notlike "*$goBin*") {
         Log-Warn "GOPATH/bin 不在 PATH 中，自动添加..."
-        [System.Environment]::SetEnvironmentVariable("Path", $env:Path + ";$goBin", "User")
-        $env:Path += ";$goBin"
-        Log-Fix "已将 $goBin 添加到 PATH"
+        Add-ToUserPath $goBin
     } else {
         Log-Pass "GOPATH/bin 已在 PATH 中"
     }
@@ -466,22 +475,56 @@ if (Get-Command wt -ErrorAction SilentlyContinue) {
 }
 
 # W03: make 工具
+# 修复：winget 安装 GnuWin32.Make 后不会自动配置 PATH，需手动写入
 Write-Host "[W03] 检测 make 工具..." -ForegroundColor Blue
 if (-not (Get-Command make -ErrorAction SilentlyContinue)) {
-    Log-Warn "make 未安装，自动安装中..."
-    if (Get-Command scoop -ErrorAction SilentlyContinue) {
-        Log-Fix "通过 Scoop 安装 make..."; scoop install make; Refresh-EnvPath
-    } elseif (Get-Command choco -ErrorAction SilentlyContinue) {
-        Log-Fix "通过 Chocolatey 安装 make..."; choco install make -y; Refresh-EnvPath
-    } elseif (Get-Command winget -ErrorAction SilentlyContinue) {
-        Log-Fix "通过 winget 安装 make..."; winget install GnuWin32.Make --silent; Refresh-EnvPath
+    Log-Warn "make 未安装或 PATH 未配置，尝试自动修复..."
+
+    # 优先检查 GnuWin32 是否已安装但 PATH 缺失（winget 安装后的常见问题）
+    $gnuWin32Path = "C:\Program Files (x86)\GnuWin32\bin"
+    if (Test-Path "$gnuWin32Path\make.exe") {
+        Log-Fix "检测到 GnuWin32 make.exe，PATH 未配置，正在写入..."
+        Add-ToUserPath $gnuWin32Path
+        if (Get-Command make -ErrorAction SilentlyContinue) {
+            Log-Pass "make $(make --version | Select-Object -First 1) 已就绪（GnuWin32）"
+        } else {
+            Log-Warn "PATH 已更新，请重启 PowerShell 后重新运行以激活"
+        }
     } else {
-        Log-Warn "无法自动安装 make，推荐先安装 Scoop: irm get.scoop.sh | iex"
+        # GnuWin32 未安装，按包管理器优先级安装
+        if (Get-Command scoop -ErrorAction SilentlyContinue) {
+            Log-Fix "通过 Scoop 安装 make（推荐，自动配置 PATH）..."
+            scoop install make
+            Refresh-EnvPath
+            if (Get-Command make -ErrorAction SilentlyContinue) { Log-Pass "make 已就绪（Scoop）" }
+            else { Log-Warn "make 安装后需重启 PowerShell" }
+        } elseif (Get-Command choco -ErrorAction SilentlyContinue) {
+            Log-Fix "通过 Chocolatey 安装 make..."
+            choco install make -y
+            Refresh-EnvPath
+            if (Get-Command make -ErrorAction SilentlyContinue) { Log-Pass "make 已就绪（Chocolatey）" }
+            else { Log-Warn "make 安装后需重启 PowerShell" }
+        } elseif (Get-Command winget -ErrorAction SilentlyContinue) {
+            Log-Fix "通过 winget 安装 GnuWin32.Make..."
+            winget install GnuWin32.Make --silent
+            # winget 安装 GnuWin32 后不自动配置 PATH，需手动写入
+            if (Test-Path "$gnuWin32Path\make.exe") {
+                Add-ToUserPath $gnuWin32Path
+                Log-Fix "GnuWin32 PATH 已配置: $gnuWin32Path"
+                if (Get-Command make -ErrorAction SilentlyContinue) { Log-Pass "make 已就绪（GnuWin32）" }
+                else { Log-Warn "PATH 已更新，请重启 PowerShell 后重新运行以激活" }
+            } else {
+                Log-Warn "GnuWin32 安装路径未找到，请手动添加 make.exe 所在目录到 PATH"
+                Log-Info "通常路径为: $gnuWin32Path"
+                Log-Info "或运行: irm get.scoop.sh | iex; scoop install make"
+            }
+        } else {
+            Log-Warn "无法自动安装 make，推荐先安装 Scoop: irm get.scoop.sh | iex"
+            Log-Info "安装 Scoop 后运行: scoop install make"
+        }
     }
-    if (Get-Command make -ErrorAction SilentlyContinue) { Log-Pass "make 已就绪" }
-    else { Log-Warn "make 安装后可能需重启 PowerShell" }
 } else {
-    Log-Pass "make 已就绪"
+    Log-Pass "make 已就绪（$(make --version | Select-Object -First 1)）"
 }
 
 # W04: Git 行尾符配置
@@ -526,6 +569,7 @@ if (Get-Command git    -ErrorAction SilentlyContinue) { Write-Host "  Git:      
 if (Get-Command node   -ErrorAction SilentlyContinue) { Write-Host "  Node.js:     $(node -v)" }
 if (Get-Command go     -ErrorAction SilentlyContinue) { Write-Host "  Go:          $(go version)" }
 if (Get-Command docker -ErrorAction SilentlyContinue) { Write-Host "  Docker:      $(docker --version)" }
+if (Get-Command make   -ErrorAction SilentlyContinue) { Write-Host "  Make:        $(make --version | Select-Object -First 1)" }
 Write-Host "  PowerShell:  $($PSVersionTable.PSVersion)"
 try { Write-Host "  分支:        $(git branch --show-current)" } catch {}
 try { Write-Host "  代码版本:    $(git rev-parse --short HEAD)" } catch {}
