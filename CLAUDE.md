@@ -8,101 +8,110 @@
 ## ⚡ 强制前置规则：环境检查
 
 > **所有阶段任务开始前，必须先执行环境检查。**
-> Claude Code 在接收到任何阶段指令时，自动加载 `.agents/skills/env-setup.md`，
-> 完成全部检查项（E01~E09、G01~G07、S01~S07、W01~W05）并输出「环境准备就绪」后，才允许进入后续阶段。
-
-**一键启动命令（每次开始工作前执行）：**
 
 ```powershell
-# Windows PowerShell（主要开发平台）
 PowerShell -ExecutionPolicy Bypass -File scripts/setup-env.ps1
-
-# 或直接启动 Claude Code（自动触发环境检查）
-claude
 ```
 
-启动后 Claude Code 自动执行：
+---
+
+## 🏗️ UMS 架构决策（ADR — 已在 develop 落地，不得推翻）
+
+### ADR-001: JWT 本地验证（零 UMS 回调）
+业务系统通过 `/.well-known/jwks.json` 缓存 RSA 公钥，本地验证 JWT。
+实现：`internal/middleware/ums.go` — UMSClient，JWKS 缓存 TTL=1h，降级服务旧缓存。
+
+### ADR-002: Token 策略
+- access_token TTL = **15分钟**（RS256）
+- refresh_token TTL = **7天**，使用后自动轮换（rotation）
+- Logout 写 JTI 至 Redis 黑名单
+
+### ADR-003: OAuth2 PKCE 强制
+授权码流程强制 S256 code_challenge。
+
+### ADR-004: RBAC
+`users → user_roles → roles → role_permissions → permissions`
+内置角色：admin / editor / viewer（is_system=true）
+
+### ADR-005: 主服务认证委托
+**feature_orbit_server 自身不实现任何认证逻辑。**
+```go
+umsClient, _ := middleware.NewUMSClient(cfg.UMSBaseURL, cfg.UMSCacheTTL)
+router.Use(umsClient.GinMiddleware())
+claims, _ := middleware.ClaimsFrom(c)
 ```
-第一步：加载 env-setup Skill → 执行所有检查项
-第二步：发现未就绪项 → 自动修复
-第三步：所有检查通过 → 输出「环境准备就绪」
-第四步：询问用户要开始哪个阶段 → 加载对应 Skill 开始工作
+
+### ADR-006: MFA Secret AES-256-GCM 加密（RISK-001 修复）
+生产环境强制配置 `UMS_MFA_ENCRYPTION_KEY`（64 hex chars）。
+未配置时生产模式启动失败，开发模式降级明文并打 WARN。
+```bash
+export UMS_MFA_ENCRYPTION_KEY=$(openssl rand -hex 32)
 ```
+
+---
+
+## 📦 服务端口规划
+
+| 服务 | 端口 | 数据库 |
+|------|------|--------|
+| feature_orbit_server | **8080** | PostgreSQL:5432 |
+| UMS | **8081** | PostgreSQL:**5433** (ums_db) |
+| UMS Redis | **6380** | DB index 1 |
+
+---
+
+## 📋 当前 develop 分支内容清单（v1.1.0-rc1）
+
+### UMS 子服务 (`ums/`)
+- `cmd/server/main.go` — 入口，DI，MFA 加密器初始化
+- `internal/config/` — Viper 配置加载
+- `internal/model/` — User / Role / Permission / OAuth2 模型
+- `internal/repository/` — UserRepo / RoleRepo / OAuth2Repo
+- `internal/service/` — Auth / User / Permission / OAuth2（含 MFA AES-GCM）
+- `internal/handler/` — Auth / User / Permission / OAuth2 Handler
+- `pkg/crypto/aes.go` — AES-256-GCM 加密工具
+- `pkg/utils/jwt.go` — RS256 JWT 签发/验证/JWKS
+- `pkg/umsclient/` — Go SDK（业务系统一行接入）
+- `migrations/` — PostgreSQL DDL + seed
+
+### 主服务 (`./`)
+- `cmd/server/main.go` — 入口，接入 UMS 中间件，Feature CRUD
+- `internal/middleware/ums.go` — UMS JWT 中间件
+- `internal/model/feature.go` — Feature 模型
+- `internal/repository/feature.go` — FeatureRepository
+- `internal/service/feature.go` — FeatureService（slug唯一、owner权限）
+- `internal/handler/feature.go` — 5个 Feature HTTP Handler
+- `internal/dto/feature.go` — DTO
+- `migrations/001_create_features.up.sql` — Feature 表 DDL
+
+### CI/CD & 文档
+- `.github/workflows/ums-ci.yml` — 覆盖率门禁 ≥80%
+- `.github/workflows/app-ci.yml` — 主服务 CI
+- `.github/workflows/integration-test.yml` — 每日集成测试
+- `docs/design/` — 系统设计文档
+- `docs/testing/` — 测试计划、测试报告、QA 验收报告
+- `docs/deployment/runbook.md` — 运维手册
 
 ---
 
 ## Skills 目录
 
-所有角色均以 Skill 形式定义，放置于 `.agents/skills/` 目录下。
-Claude Code 在执行任务时会自动检索并加载匹配的 Skill。
-
 ```
-.agents/
-└── skills/
-    ├── env-setup.md              # ⚡ 环境检查（所有阶段强制前置）
-    ├── requirements-engineer.md  # Skill: 需求工程师
-    ├── designer.md               # Skill: 系统设计师
-    ├── developer.md              # Skill: 开发工程师
-    ├── tester.md                 # Skill: 测试工程师
-    ├── qa-engineer.md            # Skill: QA 工程师
-    └── devops-engineer.md        # Skill: 运维工程师
+.agents/skills/
+├── env-setup.md
+├── requirements-engineer.md
+├── designer.md
+├── developer.md
+├── tester.md
+├── qa-engineer.md
+└── devops-engineer.md
 ```
-
----
-
-## 开发阶段总览
-
-| 阶段 | Skill | 触发关键词 | 产出物 |
-|------|-------|-----------|--------|
-| 0. 环境检查 | `env-setup` | 启动/开始工作/任意阶段指令 | 环境就绪报告 |
-| 1. 需求分析 | `requirements-engineer` | 需求、PRD、用户故事 | PRD、User Stories |
-| 2. 系统设计 | `designer` | 架构、设计、API、数据库 | 架构图、API文档 |
-| 3. 开发实现 | `developer` | 实现、编码、开发、feature | 源码、单元测试 |
-| 4. 测试验证 | `tester` | 测试、用例、Bug | 测试报告 |
-| 5. 质量保障 | `qa-engineer` | QA、验收、质量 | QA报告 |
-| 6. 部署上线 | `devops-engineer` | 部署、上线、发布、CI/CD | 上线报告 |
-
----
 
 ## 全局规则
 
-1. **环境检查前置**：任何阶段开始前必须通过 env-setup Skill 的所有检查项
-2. **严格按阶段顺序执行**，上一阶段产出物未完成不得进入下一阶段
-3. **每个阶段完成后**，创建 PR，由下一阶段角色 Review 后方可合并
-4. **所有产出物**统一存放在 `docs/` 对应子目录
-5. **代码提交**遵循 Conventional Commits 规范
-6. **Skills 可组合使用**，例如开发阶段同时加载 `developer` + `tester`
-
----
-
-## 快速启动
-
-```powershell
-# 1. 进入项目目录
-cd feature_orbit_server
-
-# 2. 运行环境检查脚本（自动检测并修复环境）
-PowerShell -ExecutionPolicy Bypass -File scripts/setup-env.ps1
-
-# 3. 启动 Claude Code
-claude
-
-# 4. 告诉 Claude Code 你要做什么
-> 开始需求分析阶段
-# Claude Code 自动检查环境 → 加载需求工程师 Skill → 开始引导
-```
-
----
-
-## 实施手册
-
-各阶段详细操作步骤请参考：
-
-| 阶段 | 手册文件 |
-|------|----------|
-| 阶段一：需求分析 | `docs/playbook/01-requirements.md` |
-| 阶段二：系统设计 | `docs/playbook/02-design.md` |
-| 阶段三：开发实现 | `docs/playbook/03-development.md` |
-| 阶段四：测试验证 | `docs/playbook/04-testing.md` |
-| 阶段五：质量保障 | `docs/playbook/05-qa.md` |
-| 阶段六：部署上线 | `docs/playbook/06-deploy.md` |
+1. 环境检查前置
+2. 严格按阶段顺序执行
+3. 每个阶段完成后创建 PR
+4. 代码提交遵循 Conventional Commits 规范
+5. 后续任务自动连续执行，无需等待用户确认
+6. **所有 ADR-001~006 已落地，后续会话继承，不得推翻**
