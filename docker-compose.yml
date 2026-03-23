@@ -20,10 +20,13 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./migrations:/docker-entrypoint-initdb.d
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 10s
+      # 使用 psql 直接验证目标库已建立，而不是仅用 pg_isready
+      # pg_isready 只验证进程就绪，不能保证 POSTGRES_DB 已初始化完成
+      test: ["CMD-SHELL", "psql -U postgres -d feature_orbit_db -c 'SELECT 1' > /dev/null 2>&1"]
+      interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 10s
     networks:
       - app_network
 

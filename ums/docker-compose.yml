@@ -14,13 +14,13 @@ services:
       - "5433:5432"
     volumes:
       - ums_postgres_data:/var/lib/postgresql/data
-      # 迁移 SQL 在容器首次创建时自动执行（只进行一次）
-      - ./migrations:/docker-entrypoint-initdb.d:ro
+      - ./migrations:/docker-entrypoint-initdb.d
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 10s
+      test: ["CMD-SHELL", "psql -U postgres -d ums_db -c 'SELECT 1' > /dev/null 2>&1"]
+      interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 10s
     networks:
       - ums_network
 
@@ -35,9 +35,9 @@ services:
       - ums_redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "redis_password", "ping"]
-      interval: 10s
+      interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
     networks:
       - ums_network
 
