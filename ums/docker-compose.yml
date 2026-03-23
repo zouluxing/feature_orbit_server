@@ -1,4 +1,5 @@
 version: '3.9'
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -8,40 +9,63 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: ums_db
-    ports: ["5433:5432"]
-    volumes: [ums_postgres_data:/var/lib/postgresql/data]
+      TZ: Asia/Shanghai
+    ports:
+      - "5433:5432"
+    volumes:
+      - ums_postgres_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d
     healthcheck:
-      test: ["CMD-SHELL","pg_isready -U postgres"]
-      interval: 10s; timeout: 5s; retries: 5
-    networks: [ums_network]
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ums_network
 
   redis:
     image: redis:7-alpine
     container_name: ums_redis
     restart: unless-stopped
     command: redis-server --appendonly yes --requirepass redis_password
-    ports: ["6380:6379"]
-    volumes: [ums_redis_data:/data]
+    ports:
+      - "6380:6379"
+    volumes:
+      - ums_redis_data:/data
     healthcheck:
-      test: ["CMD","redis-cli","-a","redis_password","ping"]
-      interval: 10s; timeout: 5s; retries: 5
-    networks: [ums_network]
+      test: ["CMD", "redis-cli", "-a", "redis_password", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ums_network
 
   ums:
-    build: {context: ., dockerfile: Dockerfile}
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: ums_app
     restart: unless-stopped
-    env_file: .env
     environment:
       UMS_CONFIG_PATH: /app/configs/config.yaml
-      UMS_DB_URL: postgres://postgres:postgres@postgres:5432/ums_db?sslmode=disable
-      UMS_REDIS_ADDR: redis:6379
+      UMS_DB_URL: postgres://postgres:postgres@ums_postgres:5432/ums_db?sslmode=disable
+      UMS_REDIS_ADDR: ums_redis:6379
       UMS_REDIS_PASSWORD: redis_password
-    ports: ["8081:8081"]
+      UMS_APP_PORT: 8081
+      UMS_APP_ENV: development
+      UMS_APP_DEBUG: "true"
+      UMS_JWT_PRIVATE_KEY_PATH: /app/configs/ums_rsa_private.pem
+      UMS_JWT_PUBLIC_KEY_PATH: /app/configs/ums_rsa_public.pem
+    ports:
+      - "8081:8081"
     depends_on:
-      postgres: {condition: service_healthy}
-      redis: {condition: service_healthy}
-    networks: [ums_network]
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - ums_network
+      - shared_network
 
 volumes:
   ums_postgres_data:
@@ -49,4 +73,7 @@ volumes:
 
 networks:
   ums_network:
+    driver: bridge
+  shared_network:
+    name: orbit_shared
     driver: bridge

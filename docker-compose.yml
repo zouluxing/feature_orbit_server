@@ -1,29 +1,24 @@
-# ================================================
-# feature_orbit_server 本地开发服务编排
-# 用法: docker compose up -d
-# ================================================
-
 version: '3.9'
+
+# feature_orbit_server 本地开发基础设施
+# 启动顺序: 先 cd ums && docker compose up -d，再回根目录 docker compose up -d
 
 services:
 
-  # ------------------------------------------------
-  # PostgreSQL 数据库
-  # ------------------------------------------------
   postgres:
     image: postgres:16-alpine
-    container_name: feature_orbit_server_postgres
+    container_name: feature_orbit_postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: feature_orbit_server
+      POSTGRES_DB: feature_orbit_db
       TZ: Asia/Shanghai
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./migrations:/docker-entrypoint-initdb.d  # 首次启动自动执行
+      - ./migrations:/docker-entrypoint-initdb.d
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s
@@ -32,56 +27,34 @@ services:
     networks:
       - app_network
 
-  # ------------------------------------------------
-  # Redis 缓存
-  # ------------------------------------------------
-  redis:
-    image: redis:7-alpine
-    container_name: feature_orbit_server_redis
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: feature_orbit_app
     restart: unless-stopped
-    command: redis-server --appendonly yes --requirepass redis_password
+    environment:
+      APP_PORT: 8080
+      APP_DEBUG: "true"
+      APP_DATABASE_URL: postgres://postgres:postgres@feature_orbit_postgres:5432/feature_orbit_db?sslmode=disable
+      APP_UMS_BASE_URL: http://ums_app:8081
+      APP_UMS_CACHE_TTL: 1h
     ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "-a", "redis_password", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
     networks:
       - app_network
+      - shared_network
 
-  # ------------------------------------------------
-  # 应用服务（可选，开发期建议本地直接运行）
-  # ------------------------------------------------
-  # app:
-  #   build: .
-  #   container_name: feature_orbit_server_app
-  #   restart: unless-stopped
-  #   env_file: .env
-  #   ports:
-  #     - "8080:8080"
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
-  #     redis:
-  #       condition: service_healthy
-  #   networks:
-  #     - app_network
-
-# ------------------------------------------------
-# 数据卷
-# ------------------------------------------------
 volumes:
   postgres_data:
     driver: local
-  redis_data:
-    driver: local
 
-# ------------------------------------------------
-# 网络
-# ------------------------------------------------
 networks:
   app_network:
     driver: bridge
+  shared_network:
+    name: orbit_shared
+    external: true
