@@ -106,6 +106,16 @@ type CreateClientResponse struct {
 	OAuth2ClientInfo
 	ClientSecret string `json:"client_secret"`
 }
+
+// UpdateClientRequest is the request body for PUT /api/v1/oauth2/clients/:id
+// Fixes BUG-002: the handler was previously a stub returning 501.
+type UpdateClientRequest struct {
+	Name         *string  `json:"name"          binding:"omitempty,min=2,max=128"`
+	RedirectURIs []string `json:"redirect_uris" binding:"omitempty,min=1"`
+	Scopes       []string `json:"scopes"        binding:"omitempty,min=1"`
+	IsActive     *bool    `json:"is_active"`
+}
+
 type OAuth2AuthorizeRequest struct {
 	ClientID            string `form:"client_id"             binding:"required"`
 	ResponseType        string `form:"response_type"         binding:"required,eq=code"`
