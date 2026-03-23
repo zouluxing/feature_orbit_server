@@ -7,10 +7,10 @@ $ErrorActionPreference = "Continue"
 $ROOT = Split-Path $PSScriptRoot -Parent
 $UMS_DIR = Join-Path $ROOT "ums"
 
-function Write-Step { param($n, $msg) Write-Host ""`n[$n] $msg"" -ForegroundColor Cyan }
-function Write-OK   { param($msg) Write-Host ""  OK  $msg"" -ForegroundColor Green }
-function Write-Fail { param($msg) Write-Host ""  FAIL $msg"" -ForegroundColor Red; Set-Location $ROOT; exit 1 }
-function Write-Info { param($msg) Write-Host ""  ...  $msg"" -ForegroundColor Gray }
+function Write-Step { param($n, $msg) Write-Host "`n[$n] $msg" -ForegroundColor Cyan }
+function Write-OK   { param($msg) Write-Host "  OK  $msg" -ForegroundColor Green }
+function Write-Fail { param($msg) Write-Host "  FAIL $msg" -ForegroundColor Red; Set-Location $ROOT; exit 1 }
+function Write-Info { param($msg) Write-Host "  ...  $msg" -ForegroundColor Gray }
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Blue
@@ -34,8 +34,42 @@ if (-not (Test-Path $UMS_DIR)) {
 }
 Write-OK "项目结构检查通过"
 
-# -- Step 1: RSA 密钥 -------------------------------------------------------
-Write-Step 1 "检查 UMS RSA 密钥"
+# -- Step 1: 检查并生成 go.sum -------------------------------------------------
+Write-Step 1 "检查 go.sum 依赖锁定文件"
+
+$go = Get-Command go -ErrorAction SilentlyContinue
+if (-not $go) {
+    Write-Info "Go 未安装，跳过 go.sum 检查（Docker 构建时会自动处理）"
+} else {
+    # 检查 UMS go.sum
+    $umsGoSum = Join-Path $UMS_DIR "go.sum"
+    if (-not (Test-Path $umsGoSum)) {
+        Write-Info "ums/go.sum 不存在，正在执行 go mod tidy 生成..."
+        Push-Location $UMS_DIR
+        go mod tidy
+        Pop-Location
+        if (Test-Path $umsGoSum) { Write-OK "ums/go.sum 已生成" }
+        else { Write-Info "ums/go.sum 生成失败，将由 Docker 构建时处理" }
+    } else {
+        Write-OK "ums/go.sum 已存在"
+    }
+
+    # 检查根目录 go.sum
+    $rootGoSum = Join-Path $ROOT "go.sum"
+    if (-not (Test-Path $rootGoSum)) {
+        Write-Info "根目录 go.sum 不存在，正在执行 go mod tidy 生成..."
+        Push-Location $ROOT
+        go mod tidy
+        Pop-Location
+        if (Test-Path $rootGoSum) { Write-OK "根目录 go.sum 已生成" }
+        else { Write-Info "根目录 go.sum 生成失败，将由 Docker 构建时处理" }
+    } else {
+        Write-OK "根目录 go.sum 已存在"
+    }
+}
+
+# -- Step 2: RSA 密钥 -------------------------------------------------------
+Write-Step 2 "检查 UMS RSA 密钥"
 
 $PRIV   = Join-Path $UMS_DIR "configs\ums_rsa_private.pem"
 $PUB    = Join-Path $UMS_DIR "configs\ums_rsa_public.pem"
@@ -51,51 +85,51 @@ if (-not (Test-Path $PRIV) -or -not (Test-Path $PUB)) {
         & openssl rsa -in $PRIV -pubout -out $PUB 2>&1 | Out-Null
         if (Test-Path $PRIV) { Write-OK "RSA 密钥已生成 (openssl)" }
         else { Write-Fail "密钥生成失败，请手动运行: openssl genrsa -out ums/configs/ums_rsa_private.pem 2048" }
-    } else {
-        $go = Get-Command go -ErrorAction SilentlyContinue
-        if ($go) {
-            Write-Info "openssl 未找到，尝试用 Go 生成密钥..."
-            $genScript = @"
+    } elseif ($go) {
+        Write-Info "openssl 未找到，用 Go 生成密钥..."
+        $genScript = @"
 package main
-import (""crypto/rand"";""crypto/rsa"";""crypto/x509"";""encoding/pem"";""os"")
+import ("crypto/rand";"crypto/rsa";"crypto/x509";"encoding/pem";"os")
 func main() {
     k,_:=rsa.GenerateKey(rand.Reader,2048)
     pf,_:=os.Create(os.Args[1])
-    pem.Encode(pf,&pem.Block{Type:""RSA PRIVATE KEY"",Bytes:x509.MarshalPKCS1PrivateKey(k)})
+    pem.Encode(pf,&pem.Block{Type:"RSA PRIVATE KEY",Bytes:x509.MarshalPKCS1PrivateKey(k)})
     pf.Close()
     bf,_:=os.Create(os.Args[2])
     b,_:=x509.MarshalPKIXPublicKey(&k.PublicKey)
-    pem.Encode(bf,&pem.Block{Type:""PUBLIC KEY"",Bytes:b})
+    pem.Encode(bf,&pem.Block{Type:"PUBLIC KEY",Bytes:b})
     bf.Close()
 }
 "@
-            $tmp = Join-Path $env:TEMP "genkey.go"
-            Set-Content $tmp $genScript
-            & go run $tmp $PRIV $PUB
-            Remove-Item $tmp -ErrorAction SilentlyContinue
-            if (Test-Path $PRIV) { Write-OK "RSA 密钥已生成 (go run)" }
-            else { Write-Fail "密钥生成失败，请手动运行: cd ums && make keys-gen" }
-        } else {
-            Write-Fail "openssl 和 go 均未找到，请安装 Git for Windows (自带 openssl) 后重试"
-        }
+        $tmp = Join-Path $env:TEMP "genkey.go"
+        Set-Content $tmp $genScript
+        & go run $tmp $PRIV $PUB
+        Remove-Item $tmp -ErrorAction SilentlyContinue
+        if (Test-Path $PRIV) { Write-OK "RSA 密钥已生成 (go run)" }
+        else { Write-Fail "密钥生成失败，请安装 Git for Windows (自带 openssl) 后重试" }
+    } else {
+        Write-Fail "openssl 和 go 均未找到，无法生成密钥。请安装 Git for Windows 或 Go"
     }
 } else {
     Write-OK "RSA 密钥已存在"
 }
 
-# -- Step 2: 启动 UMS ------------------------------------------------------
-Write-Step 2 "启动 UMS 服务 (postgres:5433 / redis:6380 / ums:8081)"
+# -- Step 3: 启动 UMS ------------------------------------------------------
+Write-Step 3 "启动 UMS 服务 (postgres:5433 / redis:6380 / ums:8081)"
 
 Set-Location $UMS_DIR
-
-# 显示构建输出，出错时能看到原因
-Write-Info "正在构建并启动 UMS 容器..."
+Write-Info "正在构建并启动 UMS 容器（首次构建需要几分钟）..."
 docker compose up -d --build
 if ($LASTEXITCODE -ne 0) {
-    Write-Fail "UMS docker compose up 失败，请查看上方输出"
+    Write-Host ""
+    Write-Host "  UMS 构建失败，常见原因和解决方式：" -ForegroundColor Yellow
+    Write-Host "  1. 依赖下载失败: 检查网络连接" -ForegroundColor Gray
+    Write-Host "  2. 端口占用:     netstat -ano | findstr :5433" -ForegroundColor Gray
+    Write-Host "  3. 查看详细日志: docker logs ums_app --tail 50" -ForegroundColor Gray
+    Set-Location $ROOT; exit 1
 }
 
-Write-Info "容器已命令启动，等待 UMS 就绪..."
+Write-Info "容器已启动，等待 UMS 就绪 (http://localhost:8081/health)..."
 $timeout = 90; $elapsed = 0; $ready = $false
 while ($elapsed -lt $timeout) {
     try {
@@ -104,7 +138,7 @@ while ($elapsed -lt $timeout) {
     } catch {}
     Start-Sleep -Seconds 3
     $elapsed += 3
-    Write-Info "等待 UMS就绪... ($elapsed/$timeout s)"
+    Write-Info "等待 UMS... ($elapsed/$timeout s)"
 }
 if (-not $ready) {
     Write-Host ""
@@ -115,18 +149,20 @@ if (-not $ready) {
 }
 Write-OK "UMS 就绪 (http://localhost:8081/health)"
 
-# -- Step 3: 启动主服务 ---------------------------------------------------
-Write-Step 3 "启动主服务 (postgres:5432 / app:8080)"
+# -- Step 4: 启动主服务 ---------------------------------------------------
+Write-Step 4 "启动主服务 (postgres:5432 / app:8080)"
 
 Set-Location $ROOT
-
 Write-Info "正在构建并启动主服务容器..."
 docker compose up -d --build
 if ($LASTEXITCODE -ne 0) {
-    Write-Fail "主服务 docker compose up 失败，请查看上方输出"
+    Write-Host ""
+    Write-Host "  主服务构建失败，请查看日志：" -ForegroundColor Yellow
+    Write-Host "    docker logs feature_orbit_app --tail 50" -ForegroundColor Gray
+    exit 1
 }
 
-Write-Info "容器已命令启动，等待主服务就绪..."
+Write-Info "容器已启动，等待主服务就绪 (http://localhost:8080/health)..."
 $timeout = 90; $elapsed = 0; $ready = $false
 while ($elapsed -lt $timeout) {
     try {
@@ -135,7 +171,7 @@ while ($elapsed -lt $timeout) {
     } catch {}
     Start-Sleep -Seconds 3
     $elapsed += 3
-    Write-Info "等待主服务就绪... ($elapsed/$timeout s)"
+    Write-Info "等待主服务... ($elapsed/$timeout s)"
 }
 if (-not $ready) {
     Write-Host ""

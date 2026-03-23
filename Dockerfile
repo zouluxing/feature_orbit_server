@@ -1,8 +1,17 @@
 FROM golang:1.22-alpine AS builder
 WORKDIR /build
-COPY go.mod go.sum ./
-RUN go mod download
+
+RUN apk add --no-cache git
+
+COPY go.mod ./
+COPY go.su[m] ./
+
+RUN go mod download || go mod tidy
+
 COPY . .
+
+RUN go mod tidy
+
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o feature_orbit_server ./cmd/server
 
 FROM alpine:3.19
