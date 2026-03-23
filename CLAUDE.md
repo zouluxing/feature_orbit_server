@@ -21,12 +21,61 @@ PowerShell -ExecutionPolicy Bypass -File scripts/setup-env.ps1
 claude
 ```
 
-启动后 Claude Code 自动执行：
-```
-第一步：加载 env-setup Skill → 执行所有检查项
-第二步：发现未就绪项 → 自动修复
-第三步：所有检查通过 → 输出「环境准备就绪」
-第四步：询问用户要开始哪个阶段 → 加载对应 Skill 开始工作
+---
+
+## 🏗️ UMS 架构决策（ADR — 已实施）
+
+> **重要**：以下决策已在 PR #1~#5 中落地，后续所有 Claude 会话必须遵守，不得推翻。
+
+### ADR-001: JWT 本地验证（无 UMS 回调）
+- **决策**：business systems（如 feature_orbit_server）通过 `/.well-known/jwks.json` 获取 RSA 公钥，在本地验证 UMS 颁发的 JWT，**不回调 UMS**
+- **实现**：`internal/middleware/ums.go` — `UMSClient` 本地缓存公钥，TTL=1h
+- **理由**：零额外延迟；UMS 故障不影响已登录用户；水平扩展无状态
+
+### ADR-002: Token 策略
+- access_token TTL = **15分钟**（RS256 签名）
+- refresh_token TTL = **7天**，使用后自动轮换（rotation）
+- Logout 将 JTI 写入 Redis 黑名单（TTL=access_token TTL + 1min）
+
+### ADR-003: OAuth2 PKCE 强制
+- 授权码流程强制使用 S256 code_challenge
+- 适用于所有 SPA 和移动端接入场景
+
+### ADR-004: RBAC 实现
+- 模型：`users → user_roles → roles → role_permissions → permissions`
+- roles 内置：`admin` / `editor` / `viewer`（is_system=true，不可删除）
+- 权限粒度：`resource:action`（如 `user:delete`、`oauth2_client:create`）
+
+### ADR-005: 主服务认证委托
+- **feature_orbit_server 自身不实现任何认证逻辑**
+- 所有认证通过 `internal/middleware.UMSClient.GinMiddleware()` 完成
+- Handler 通过 `middleware.ClaimsFrom(c)` 获取用户身份
+
+---
+
+## 📦 服务端口规划
+
+| 服务 | 端口 | 数据库 | 备注 |
+|------|------|--------|------|
+| feature_orbit_server | **8080** | PostgreSQL:5432 | 主业务服务 |
+| UMS | **8081** | PostgreSQL:**5433** | 独立数据库 ums_db |
+| UMS Redis | **6380** | — | DB index 1，避免冲突 |
+
+---
+
+## 🔌 UMS 集成快速参考
+
+```go
+// 初始化（main.go 启动时执行一次）
+umsClient, err := middleware.NewUMSClient("http://ums:8081", time.Hour)
+
+// 注册中间件
+router.Use(umsClient.GinMiddleware())           // 验证 JWT
+router.Use(umsClient.RequireRole("admin"))       // 角色守卫（可选）
+
+// Handler 中读取用户信息
+claims, _ := middleware.ClaimsFrom(c)
+fmt.Println(claims.UserUUID, claims.Email, claims.Roles)
 ```
 
 ---
@@ -34,7 +83,6 @@ claude
 ## Skills 目录
 
 所有角色均以 Skill 形式定义，放置于 `.agents/skills/` 目录下。
-Claude Code 在执行任务时会自动检索并加载匹配的 Skill。
 
 ```
 .agents/
@@ -72,25 +120,7 @@ Claude Code 在执行任务时会自动检索并加载匹配的 Skill。
 4. **所有产出物**统一存放在 `docs/` 对应子目录
 5. **代码提交**遵循 Conventional Commits 规范
 6. **Skills 可组合使用**，例如开发阶段同时加载 `developer` + `tester`
-
----
-
-## 快速启动
-
-```powershell
-# 1. 进入项目目录
-cd feature_orbit_server
-
-# 2. 运行环境检查脚本（自动检测并修复环境）
-PowerShell -ExecutionPolicy Bypass -File scripts/setup-env.ps1
-
-# 3. 启动 Claude Code
-claude
-
-# 4. 告诉 Claude Code 你要做什么
-> 开始需求分析阶段
-# Claude Code 自动检查环境 → 加载需求工程师 Skill → 开始引导
-```
+7. **后续任务自动连续执行**，无需等待用户确认（已由用户授权）
 
 ---
 
