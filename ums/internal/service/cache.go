@@ -2,11 +2,13 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 )
 
+// CacheService abstracts Redis operations needed by services.
 type CacheService interface {
 	Set(ctx context.Context, key, value string, ttl time.Duration) error
 	Get(ctx context.Context, key string) (string, error)
@@ -32,12 +34,20 @@ func (c *redisCache) Exists(ctx context.Context, key string) (bool, error) {
 func (c *redisCache) Del(ctx context.Context, key string) error {
 	return c.rdb.Del(ctx, key).Err()
 }
+
+// Incr atomically increments key and sets TTL if key is new.
+// BUG-001 fix: pipeline exec errors are now correctly propagated to the caller.
 func (c *redisCache) Incr(ctx context.Context, key string, ttl time.Duration) (int64, error) {
 	pipe := c.rdb.Pipeline()
-	incr := pipe.Incr(ctx, key)
+	incrCmd := pipe.Incr(ctx, key)
 	pipe.Expire(ctx, key, ttl)
 	if _, err := pipe.Exec(ctx); err != nil {
-		return 0, err
+		// Return the pipeline execution error instead of silently swallowing it.
+		return 0, fmt.Errorf("cache Incr pipeline exec: %w", err)
 	}
-	return incr.Val(), nil
+	val, err := incrCmd.Result()
+	if err != nil {
+		return 0, fmt.Errorf("cache Incr result: %w", err)
+	}
+	return val, nil
 }
