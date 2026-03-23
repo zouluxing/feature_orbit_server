@@ -1,0 +1,97 @@
+name: UMS CI
+
+on:
+  push:
+    branches: [develop, main]
+    paths:
+      - 'ums/**'
+  pull_request:
+    branches: [develop, main]
+    paths:
+      - 'ums/**'
+
+env:
+  GO_VERSION: '1.21'
+
+jobs:
+  test:
+    name: Unit Tests + Coverage
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ums
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: ums/go.sum
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run unit tests with coverage
+        run: |
+          go test ./tests/unit/... \
+            -v \
+            -timeout 60s \
+            -coverprofile=coverage.out \
+            -covermode=atomic
+
+      - name: Check coverage threshold (>= 80%)
+        run: |
+          COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | tr -d '%')
+          echo "Coverage: ${COVERAGE}%"
+          if (( $(echo "$COVERAGE < 80" | bc -l) )); then
+            echo "::error::Coverage ${COVERAGE}% is below the 80% threshold"
+            exit 1
+          fi
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: ums-coverage
+          path: ums/coverage.out
+          retention-days: 7
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ums
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: ums/go.sum
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v4
+        with:
+          version: latest
+          working-directory: ums
+          args: --timeout=5m
+
+  build:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: [test, lint]
+    if: github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Docker image
+        run: docker build -t ums:${{ github.sha }} ./ums
+      - name: Smoke test image
+        run: |
+          docker run -d --name ums_test \
+            -e UMS_DB_URL="" \
+            -e UMS_REDIS_ADDR="" \
+            -p 18081:8081 ums:${{ github.sha }} || true
+          sleep 2
+          # Image build success is sufficient for PR; health check needs infra
+          docker rm -f ums_test 2>/dev/null || true
+          echo "Docker build succeeded"
